@@ -48,14 +48,14 @@ Server (on the host machine, as your user):
 ./install.sh
 ```
 
-This serves the app on `127.0.0.1:4580` and on `https://<host>.<tailnet>.ts.net:8445` via
-Tailscale Serve. Set `IGNITION_PORT` or `IGNITION_HTTPS_PORT` to change the ports.
+This serves the app on `127.0.0.1:4580` and on `http://<host>:8445` via
+Tailscale Serve. Set `IGNITION_PORT` or `IGNITION_TAILNET_PORT` to change the ports. It is plain HTTP; only tailnet devices can reach it.
 
 Enforcer (on each machine to lock down, as root):
 
 ```sh
 sudo enforcer/install.sh --server-url http://127.0.0.1:4580 --t3-user me --host nas --t3-ports 3773,13773
-sudo enforcer/install.sh --server-url https://<host>.<tailnet>.ts.net:8445 --t3-user me --host gamer --block lutris --notify
+sudo enforcer/install.sh --server-url http://<host>.<tailnet>.ts.net:8445 --t3-user me --host gamer --block lutris --notify
 ```
 
 Config ends up in `/etc/ignition/enforcer.json`. Edit it and run
