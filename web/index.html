@@ -6,17 +6,17 @@
   <meta name="theme-color" content="#000000">
   <meta name="color-scheme" content="dark">
   <title>ignition</title>
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/icon-192.png">
-  <link rel="stylesheet" href="/style.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="burnbar" hidden><div></div></div>
 
   <header class="top">
     <a class="brand" href="#need" aria-label="ignition">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4-3 6-3 10a3 3 0 0 0 6 0c0-1.5-.6-2.6-1.2-3.4C17 10 18 13 18 15a6 6 0 0 1-12 0c0-5 5-7 6-13z"/></svg>
+      <svg viewBox="0 0 512 512" aria-hidden="true"><path class="flame" d=""/></svg>
       <span>ignition</span>
     </a>
     <nav class="tabs" aria-label="Pages">
@@ -24,6 +24,9 @@
       <a href="#want" data-tab="want"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><span>Want</span></a>
       <a href="#ignite" data-tab="ignite"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M10 2h4"/></svg><span id="tab-ignite-label">Ignite</span></a>
     </nav>
+    <button class="icon-btn" id="settings-btn" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
   </header>
 
   <main>
@@ -31,6 +34,7 @@
       <div class="page-head">
         <h1>Need to do</h1>
         <span class="count" id="count-need"></span>
+        <button class="sort-btn" type="button" data-sort-for="need"></button>
       </div>
       <ul class="items" id="items-need"></ul>
       <p class="empty" id="empty-need" hidden>Nothing due. Suspicious.</p>
@@ -44,6 +48,7 @@
       <div class="page-head">
         <h1>Want to do</h1>
         <span class="count" id="count-want"></span>
+        <button class="sort-btn" type="button" data-sort-for="want"></button>
       </div>
       <ul class="items" id="items-want"></ul>
       <p class="empty" id="empty-want" hidden>Nothing here yet.</p>
@@ -66,21 +71,45 @@
           </button>
         </div>
 
-        <div class="duration" id="duration">
-          <label for="minutes">for</label>
-          <input id="minutes" type="number" inputmode="numeric" min="1" max="720" list="minute-presets" value="50">
-          <datalist id="minute-presets">
-            <option value="25"><option value="45"><option value="50"><option value="60"><option value="90"><option value="120">
-          </datalist>
-          <span>min</span>
+        <div class="launch-params" id="launch-params">
+          <div class="duration">
+            <label for="minutes">for</label>
+            <input id="minutes" type="number" inputmode="numeric" min="1" max="720" list="minute-presets" value="50">
+            <datalist id="minute-presets">
+              <option value="25"><option value="45"><option value="50"><option value="60"><option value="90"><option value="120">
+            </datalist>
+            <span>min</span>
+            <button class="info-btn" id="info-btn" type="button" aria-label="About ending early" aria-expanded="false">i</button>
+            <div class="popover" id="info-pop" role="tooltip" hidden>
+              Over an hour, you can end a burn early by holding a button.
+              An hour or less, you're locked in until it burns out.
+            </div>
+          </div>
+          <div class="duration tminus">
+            <label for="delay">T-minus</label>
+            <input id="delay" type="number" inputmode="numeric" min="0" max="1440" list="delay-presets" value="0">
+            <datalist id="delay-presets">
+              <option value="0"><option value="5"><option value="10"><option value="15"><option value="30">
+            </datalist>
+            <span>min</span>
+          </div>
         </div>
 
         <div class="session-info" id="session-info" hidden>
           <p class="until" id="until"></p>
+          <div class="chips extend" id="extend" hidden>
+            <span>Extend</span>
+            <button type="button" data-extend="5">+5</button>
+            <button type="button" data-extend="15">+15</button>
+            <button type="button" data-extend="30">+30</button>
+          </div>
           <button class="hold-btn" id="stop-btn" type="button" hidden><span class="hold-fill"></span><span class="hold-text">Hold to end early</span></button>
-          <p class="locked-note" id="locked-note" hidden>No way out under an hour. Get to work.</p>
+          <button class="ghost small" id="scrub-btn" type="button" hidden>Scrub launch</button>
+          <p class="locked-note" id="locked-note" hidden>No way out. Get to work.</p>
         </div>
 
+        <div class="burn-stats" id="burn-stats"></div>
+        <p class="next-sched" id="next-sched" hidden></p>
         <ul class="enforcers" id="enforcers"></ul>
 
         <div class="up-next" id="up-next" hidden>
@@ -94,6 +123,8 @@
   <button class="fab" id="fab" type="button" aria-label="Add">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
   </button>
+
+  <div class="menu" id="sort-menu" role="menu" hidden></div>
 
   <dialog id="add-dialog" class="sheet">
     <form method="dialog" id="add-form" autocomplete="off">
@@ -110,6 +141,52 @@
         <button type="submit" class="primary" id="add-submit">Add</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="settings-dialog" class="sheet tall">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <div class="settings-head">
+      <h2>Settings</h2>
+      <button type="button" class="icon-btn" id="settings-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <section class="set-group">
+      <h3>Burn goals</h3>
+      <div class="set-row"><label for="goal-daily">Daily</label><input id="goal-daily" type="number" inputmode="numeric" min="0" placeholder="0"><span>min</span></div>
+      <div class="set-row"><label for="goal-weekly">Weekly</label><input id="goal-weekly" type="number" inputmode="numeric" min="0" placeholder="0"><span>hours</span></div>
+    </section>
+
+    <section class="set-group">
+      <h3>Launch schedule</h3>
+      <p class="hint">Ignites by itself at these times. You get a T-minus warning first and can scrub it.</p>
+      <ul class="schedules" id="schedules"></ul>
+      <button type="button" class="ghost small" id="add-schedule">+ Add launch window</button>
+    </section>
+
+    <section class="set-group" id="app-settings" hidden>
+      <h3>Sync</h3>
+      <p class="hint">Optional. Point this at an ignition server to share lists and burns with your other devices.</p>
+      <div class="set-row wide"><input id="server-url" type="url" inputmode="url" placeholder="http://my-server:8445" autocapitalize="off" spellcheck="false"></div>
+      <div class="set-row wide"><button type="button" class="ghost small" id="server-test">Test &amp; save</button><span class="hint" id="sync-status"></span></div>
+
+      <h3>Phone</h3>
+      <div class="toggle-row"><span>Do Not Disturb while burning</span><label class="switch" aria-label="Do Not Disturb while burning"><input type="checkbox" id="dnd-toggle"><i></i></label></div>
+      <p class="hint" id="dnd-hint"></p>
+      <div class="toggle-row"><span>Notifications</span><button type="button" class="ghost small" id="notif-btn">Allow</button></div>
+      <details class="tasker">
+        <summary>Tasker &amp; automation</summary>
+        <p class="hint">Ignition broadcasts these intents (use Tasker's <em>Intent Received</em> event):</p>
+        <code>ca.heeney.ignition.COUNTDOWN<br>ca.heeney.ignition.LIFTOFF<br>ca.heeney.ignition.MECO</code>
+        <p class="hint">Extras: <code>minutes</code>, <code>starts_at</code>, <code>ends_at</code> (unix seconds), <code>source</code>. To ignite from Tasker, send broadcast <code>ca.heeney.ignition.IGNITE</code> (package <code>ca.heeney.ignition</code>) with extras <code>minutes</code> and optional <code>delay</code>.</p>
+      </details>
+    </section>
+
+    <div class="sheet-actions">
+      <span class="hint" id="settings-msg"></span>
+      <button type="button" class="primary" id="settings-save">Save</button>
+    </div>
   </dialog>
 
   <div class="toast" id="toast" role="status" hidden></div>
@@ -148,6 +225,22 @@
     </div>
   </template>
 
-  <script src="/app.js"></script>
+  <template id="tpl-schedule">
+    <li class="schedule">
+      <div class="sched-top">
+        <input type="time" class="sched-time" aria-label="Time">
+        <span>for</span>
+        <input type="number" class="sched-min" inputmode="numeric" min="1" max="720" aria-label="Minutes">
+        <span>min</span>
+        <label class="switch" aria-label="Enabled"><input type="checkbox" class="sched-on"><i></i></label>
+        <button type="button" class="icon-btn sched-del" aria-label="Remove"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <div class="sched-days"></div>
+      <div class="sched-lead"><span>T-minus warning</span><input type="number" class="sched-lead-min" inputmode="numeric" min="0" max="60" aria-label="Warning minutes"><span>min before</span></div>
+    </li>
+  </template>
+
+  <script src="flame.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

@@ -1,22 +1,37 @@
 #!/usr/bin/env python3
-"""Ignition: a tiny to-do / want-to-do / focus-timer server. Stdlib only."""
+"""Ignition: need-to-do / want-to-do lists and a focus timer that locks out distractions. Stdlib only.
+
+Data model (shared with the Android app, which syncs through POST /api/sync):
+  items     uid, list, title, estimate_min, due, priority, notes, created_at, done_at
+  sessions  uid, minutes, planned, created_at, starts_at, ends_at, stopped_at, source
+  settings  one JSON document (goals, schedules)
+Every row carries updated_at (ms, last-writer-wins), deleted (tombstone) and rev (server change counter).
+Times are unix seconds except updated_at.
+"""
 
 import argparse
 import json
 import mimetypes
 import os
+import secrets
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 LISTS = ("need", "want")
-EDITABLE = ("title", "estimate_min", "due", "priority", "notes", "list", "done")
-EARLY_STOP_MIN_MINUTES = 60
+EARLY_STOP_OVER_MINUTES = 60
 MAX_MINUTES = 12 * 60
+MAX_DELAY = 24 * 60
+SCHEDULE_WINDOW = 120  # seconds after a scheduled time during which it may still fire
+
+ITEM_FIELDS = ("list", "title", "estimate_min", "due", "priority", "notes", "created_at", "done_at")
+SESSION_FIELDS = ("minutes", "planned", "created_at", "starts_at", "ends_at", "stopped_at", "source")
+DEFAULT_SETTINGS = {"goals": {"daily": 0, "weekly": 0}, "schedules": []}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -42,7 +57,43 @@ CREATE TABLE IF NOT EXISTS enforcers (
     last_seen INTEGER NOT NULL,
     status TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS kv (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    rev INTEGER NOT NULL DEFAULT 0
+);
 """
+
+MIGRATIONS = {
+    "items": [
+        ("uid", "TEXT"), ("updated_at", "INTEGER NOT NULL DEFAULT 0"),
+        ("deleted", "INTEGER NOT NULL DEFAULT 0"), ("rev", "INTEGER NOT NULL DEFAULT 0"),
+    ],
+    "sessions": [
+        ("uid", "TEXT"), ("planned", "INTEGER"), ("created_at", "INTEGER"), ("source", "TEXT NOT NULL DEFAULT 'manual'"),
+        ("updated_at", "INTEGER NOT NULL DEFAULT 0"), ("deleted", "INTEGER NOT NULL DEFAULT 0"),
+        ("rev", "INTEGER NOT NULL DEFAULT 0"),
+    ],
+}
+
+
+def now():
+    return int(time.time())
+
+
+def now_ms():
+    return int(time.time() * 1000)
+
+
+def new_uid():
+    return secrets.token_hex(8)
+
+
+class ApiError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
 
 
 class Store:
@@ -52,7 +103,35 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        self.migrate()
+
+    def migrate(self):
+        for table, cols in MIGRATIONS.items():
+            have = {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            for name, decl in cols:
+                if name not in have:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+        for table in ("items", "sessions"):
+            for r in self.db.execute(f"SELECT id FROM {table} WHERE uid IS NULL").fetchall():
+                self.db.execute(f"UPDATE {table} SET uid=?, updated_at=?, rev=? WHERE id=?",
+                                (new_uid(), now_ms(), self.next_rev(), r["id"]))
+        self.db.execute("UPDATE sessions SET planned=minutes WHERE planned IS NULL")
+        self.db.execute("UPDATE sessions SET created_at=started_at WHERE created_at IS NULL")
+        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS items_uid ON items(uid)")
+        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS sessions_uid ON sessions(uid)")
+
+    def next_rev(self):
+        with self.lock:
+            row = self.db.execute("SELECT value FROM kv WHERE key='_rev'").fetchone()
+            rev = (int(row["value"]) if row else 0) + 1
+            self.db.execute("INSERT INTO kv (key, value) VALUES ('_rev', ?) "
+                            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(rev),))
+            return rev
+
+    def rev(self):
+        row = self.db.execute("SELECT value FROM kv WHERE key='_rev'").fetchone()
+        return int(row["value"]) if row else 0
 
     def q(self, sql, args=()):
         with self.lock:
@@ -63,19 +142,12 @@ class Store:
             return self.db.execute(sql, args).lastrowid
 
 
-def now():
-    return int(time.time())
+# ---------------------------------------------------------------- validation
 
 
-class ApiError(Exception):
-    def __init__(self, status, message):
-        super().__init__(message)
-        self.status = status
-
-
-def clean_item_fields(body, partial):
+def clean_item(body, partial):
     out = {}
-    for key in EDITABLE:
+    for key in ITEM_FIELDS + ("done",):
         if key not in body:
             continue
         val = body[key]
@@ -95,6 +167,8 @@ def clean_item_fields(body, partial):
         elif key == "list":
             if val not in LISTS:
                 raise ApiError(400, "bad list")
+        elif key in ("created_at", "done_at"):
+            val = None if val in (None, "") else int(val)
         elif key == "done":
             key, val = "done_at", (now() if val else None)
         out[key] = val
@@ -103,90 +177,337 @@ def clean_item_fields(body, partial):
     return out
 
 
+def clean_session(body):
+    out = {}
+    for key in SESSION_FIELDS:
+        if key in body:
+            val = body[key]
+            out[key] = str(val or "manual")[:20] if key == "source" else (None if val is None else int(val))
+    return out
+
+
+def clean_settings(body):
+    s = json.loads(json.dumps(DEFAULT_SETTINGS))
+    goals = body.get("goals") or {}
+    s["goals"] = {k: max(0, min(24 * 60 * 7, int(goals.get(k) or 0))) for k in ("daily", "weekly")}
+    scheds = []
+    for sc in (body.get("schedules") or [])[:20]:
+        hh, mm = (str(sc.get("time") or "09:00") + ":00").split(":")[:2]
+        days = sorted({int(d) for d in (sc.get("days") or []) if 1 <= int(d) <= 7})
+        scheds.append({
+            "id": str(sc.get("id") or new_uid())[:32],
+            "time": f"{min(23, max(0, int(hh))):02d}:{min(59, max(0, int(mm))):02d}",
+            "days": days or [1, 2, 3, 4, 5, 6, 7],
+            "minutes": max(1, min(MAX_MINUTES, int(sc.get("minutes") or 50))),
+            "lead": max(0, min(60, int(sc.get("lead") if sc.get("lead") is not None else 5))),
+            "enabled": bool(sc.get("enabled", True)),
+        })
+    s["schedules"] = scheds
+    return s
+
+
+# ---------------------------------------------------------------- time helpers
+
+
+def local_midnight(ts):
+    d = datetime.fromtimestamp(ts)
+    return int(datetime(d.year, d.month, d.day).timestamp())
+
+
+def schedule_occurrences(sched, start_ts, days_ahead):
+    """Yield (unix time, YYYYMMDD) for each occurrence of a schedule from start_ts's day onwards."""
+    hh, mm = map(int, sched["time"].split(":"))
+    base = datetime.fromtimestamp(start_ts).replace(hour=0, minute=0, second=0, microsecond=0)
+    for n in range(days_ahead + 1):
+        day = base + timedelta(days=n)
+        if day.isoweekday() in sched["days"]:
+            at = day.replace(hour=hh, minute=mm)
+            yield int(at.timestamp()), at.strftime("%Y%m%d")
+
+
+def schedule_uid(sched_id, ymd):
+    return f"sched-{sched_id}-{ymd}"
+
+
+# ---------------------------------------------------------------- app
+
+
 class App:
     def __init__(self, store):
         self.s = store
 
+    # ---- serialisation
+
+    @staticmethod
+    def item_out(r):
+        return {
+            "id": r["uid"], "list": r["list"], "title": r["title"], "estimate_min": r["estimate_min"],
+            "due": r["due"], "priority": r["priority"], "notes": r["notes"], "created_at": r["created_at"],
+            "done_at": r["done_at"], "updated_at": r["updated_at"], "deleted": bool(r["deleted"]),
+        }
+
+    @staticmethod
+    def session_out(r):
+        return {
+            "id": r["uid"], "minutes": r["minutes"], "planned": r["planned"], "created_at": r["created_at"],
+            "starts_at": r["started_at"], "ends_at": r["ends_at"], "stopped_at": r["stopped_at"],
+            "source": r["source"], "updated_at": r["updated_at"], "deleted": bool(r["deleted"]),
+        }
+
+    # ---- items
+
     def items(self):
-        return self.s.q("SELECT * FROM items ORDER BY id")
+        return [self.item_out(r) for r in self.s.q("SELECT * FROM items WHERE deleted=0 ORDER BY id")]
 
-    def create_item(self, body):
-        f = clean_item_fields(body, partial=False)
-        f.setdefault("list", "need")
-        f["created_at"] = now()
-        if f.get("list") == "want":
-            f.pop("due", None)
-        cols = ", ".join(f)
-        marks = ", ".join("?" for _ in f)
-        rid = self.s.x(f"INSERT INTO items ({cols}) VALUES ({marks})", list(f.values()))
-        return self.s.q("SELECT * FROM items WHERE id=?", (rid,))[0]
-
-    def update_item(self, rid, body):
-        f = clean_item_fields(body, partial=True)
-        if f.get("list") == "want":
-            f["due"] = None
-        if f:
-            sets = ", ".join(f"{k}=?" for k in f)
-            self.s.x(f"UPDATE items SET {sets} WHERE id=?", [*f.values(), rid])
-        rows = self.s.q("SELECT * FROM items WHERE id=?", (rid,))
+    def get_item(self, uid):
+        rows = self.s.q("SELECT * FROM items WHERE uid=?", (uid,))
         if not rows:
             raise ApiError(404, "no such item")
         return rows[0]
 
-    def delete_item(self, rid):
-        self.s.x("DELETE FROM items WHERE id=?", (rid,))
+    def create_item(self, body):
+        f = clean_item(body, partial=False)
+        f.setdefault("list", "need")
+        f.setdefault("created_at", now())
+        if f["list"] == "want":
+            f["due"] = None
+        uid = str(body.get("id") or new_uid())[:40]
+        with self.s.lock:
+            if self.s.q("SELECT 1 FROM items WHERE uid=?", (uid,)):
+                raise ApiError(409, "item exists")
+            f.update(uid=uid, updated_at=now_ms(), rev=self.s.next_rev())
+            self.s.x(f"INSERT INTO items ({', '.join(f)}) VALUES ({', '.join('?' for _ in f)})", list(f.values()))
+            return self.item_out(self.get_item(uid))
+
+    def update_item(self, uid, body):
+        f = clean_item(body, partial=True)
+        if f.get("list") == "want":
+            f["due"] = None
+        with self.s.lock:
+            self.get_item(uid)
+            f.update(updated_at=now_ms(), rev=self.s.next_rev())
+            self.s.x(f"UPDATE items SET {', '.join(f'{k}=?' for k in f)} WHERE uid=?", [*f.values(), uid])
+            return self.item_out(self.get_item(uid))
+
+    def delete_item(self, uid):
+        with self.s.lock:
+            self.s.x("UPDATE items SET deleted=1, updated_at=?, rev=? WHERE uid=?", (now_ms(), self.s.next_rev(), uid))
         return {"ok": True}
 
-    def current_session(self):
-        rows = self.s.q(
-            "SELECT * FROM sessions WHERE stopped_at IS NULL AND ends_at > ? "
-            "ORDER BY id DESC LIMIT 1",
-            (now(),),
-        )
-        return rows[0] if rows else None
+    # ---- settings
 
-    def ignite_state(self):
-        sess = self.current_session()
-        t = now()
-        enforcers = [
-            {**e, "status": json.loads(e["status"]), "age": t - e["last_seen"]}
-            for e in self.s.q("SELECT * FROM enforcers ORDER BY host")
-        ]
-        state = {"now": t, "active": bool(sess), "enforcers": enforcers}
-        if sess:
-            state.update(
-                session_id=sess["id"],
-                minutes=sess["minutes"],
-                started_at=sess["started_at"],
-                ends_at=sess["ends_at"],
-                can_stop=sess["minutes"] > EARLY_STOP_MIN_MINUTES,
+    def settings(self):
+        row = self.s.q("SELECT * FROM kv WHERE key='settings'")
+        if not row:
+            return json.loads(json.dumps(DEFAULT_SETTINGS)), 0
+        return json.loads(row[0]["value"]), row[0]["updated_at"]
+
+    def put_settings(self, body, updated_at=None):
+        value = clean_settings(body)
+        with self.s.lock:
+            self.s.x(
+                "INSERT INTO kv (key, value, updated_at, rev) VALUES ('settings', ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, rev=excluded.rev",
+                (json.dumps(value), updated_at or now_ms(), self.s.next_rev()),
             )
-        return state
+        return value
+
+    # ---- sessions
+
+    def sessions_live(self, t):
+        return self.s.q(
+            "SELECT * FROM sessions WHERE deleted=0 AND stopped_at IS NULL AND ends_at > ? ORDER BY started_at",
+            (t,),
+        )
+
+    def current(self, t=None):
+        """(phase, row): the burning session if any, else the next countdown, else ('idle', None)."""
+        t = t or now()
+        live = self.sessions_live(t)
+        burning = [r for r in live if r["started_at"] <= t]
+        if burning:
+            return "burning", burning[-1]
+        if live:
+            return "countdown", live[0]
+        return "idle", None
+
+    def insert_session(self, uid, minutes, starts_at, source, planned=None):
+        t = now()
+        with self.s.lock:
+            self.s.x(
+                "INSERT INTO sessions (uid, minutes, planned, created_at, started_at, ends_at, source, updated_at, rev) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (uid, minutes, planned or minutes, t, starts_at, starts_at + minutes * 60, source, now_ms(), self.s.next_rev()),
+            )
+
+    def touch_session(self, row, **changes):
+        with self.s.lock:
+            changes.update(updated_at=now_ms(), rev=self.s.next_rev())
+            self.s.x(f"UPDATE sessions SET {', '.join(f'{k}=?' for k in changes)} WHERE uid=?",
+                     [*changes.values(), row["uid"]])
 
     def ignite(self, body):
-        if self.current_session():
-            raise ApiError(409, "already ignited")
+        try:
+            minutes = int(body.get("minutes"))
+            delay = int(body.get("delay") or 0)
+        except (TypeError, ValueError):
+            raise ApiError(400, "minutes must be a number")
+        if not 1 <= minutes <= MAX_MINUTES:
+            raise ApiError(400, f"minutes must be 1-{MAX_MINUTES}")
+        if not 0 <= delay <= MAX_DELAY:
+            raise ApiError(400, f"T-minus must be 0-{MAX_DELAY} minutes")
+        with self.s.lock:
+            phase, _ = self.current()
+            if phase == "burning":
+                raise ApiError(409, "already burning")
+            if phase == "countdown":
+                raise ApiError(409, "a countdown is already running")
+            self.insert_session(str(body.get("id") or new_uid())[:40], minutes, now() + delay * 60, "manual")
+        return self.ignite_state()
+
+    def stop(self):
+        with self.s.lock:
+            phase, row = self.current()
+            if phase == "countdown":
+                return self.scrub()
+            if phase == "burning":
+                if (row["planned"] or row["minutes"]) <= EARLY_STOP_OVER_MINUTES:
+                    raise ApiError(403, "no way out")
+                self.touch_session(row, stopped_at=now())
+        return self.ignite_state()
+
+    def scrub(self):
+        with self.s.lock:
+            phase, row = self.current()
+            if phase != "countdown":
+                raise ApiError(409, "nothing to scrub")
+            self.touch_session(row, stopped_at=now())
+        return self.ignite_state()
+
+    def ignite_now(self):
+        with self.s.lock:
+            phase, row = self.current()
+            if phase != "countdown":
+                raise ApiError(409, "no countdown")
+            t = now()
+            self.touch_session(row, started_at=t, ends_at=t + row["minutes"] * 60)
+        return self.ignite_state()
+
+    def extend(self, body):
         try:
             minutes = int(body.get("minutes"))
         except (TypeError, ValueError):
             raise ApiError(400, "minutes must be a number")
         if not 1 <= minutes <= MAX_MINUTES:
-            raise ApiError(400, f"minutes must be 1-{MAX_MINUTES}")
-        t = now()
-        self.s.x(
-            "INSERT INTO sessions (minutes, started_at, ends_at) VALUES (?, ?, ?)",
-            (minutes, t, t + minutes * 60),
-        )
+            raise ApiError(400, "bad minutes")
+        with self.s.lock:
+            phase, row = self.current()
+            if phase == "idle":
+                raise ApiError(409, "nothing burning")
+            if row["minutes"] + minutes > MAX_MINUTES:
+                raise ApiError(400, "that's too long")
+            self.touch_session(row, minutes=row["minutes"] + minutes, ends_at=row["ends_at"] + minutes * 60)
         return self.ignite_state()
 
-    def stop(self):
-        sess = self.current_session()
-        if not sess:
-            return self.ignite_state()
-        if sess["minutes"] <= EARLY_STOP_MIN_MINUTES:
-            raise ApiError(403, "sessions of an hour or less can't be ended early")
-        self.s.x("UPDATE sessions SET stopped_at=? WHERE id=?", (now(), sess["id"]))
+    def skip(self, body):
+        """Skip one occurrence of a schedule (writes a tombstone with the deterministic uid)."""
+        sid, ymd = str(body.get("schedule_id") or ""), str(body.get("date") or "")
+        if not sid or not ymd.isdigit():
+            raise ApiError(400, "schedule_id and date (YYYYMMDD) required")
+        uid = schedule_uid(sid, ymd)
+        with self.s.lock:
+            rows = self.s.q("SELECT * FROM sessions WHERE uid=?", (uid,))
+            if rows:
+                if rows[0]["started_at"] > now():
+                    self.touch_session(rows[0], stopped_at=now())
+            else:
+                self.insert_session(uid, 1, now(), "schedule")
+                self.touch_session({"uid": uid}, deleted=1)
         return self.ignite_state()
+
+    # ---- schedules
+
+    def run_schedules(self, t=None):
+        t = t or now()
+        settings, _ = self.settings()
+        for sc in settings["schedules"]:
+            if not sc["enabled"]:
+                continue
+            for at, ymd in schedule_occurrences(sc, t - SCHEDULE_WINDOW, 1):
+                if not at <= t < at + SCHEDULE_WINDOW:
+                    continue
+                uid = schedule_uid(sc["id"], ymd)
+                with self.s.lock:
+                    if self.s.q("SELECT 1 FROM sessions WHERE uid=?", (uid,)):
+                        continue
+                    if self.current(t)[0] != "idle":
+                        continue
+                    self.insert_session(uid, sc["minutes"], at, "schedule")
+
+    def next_schedule(self, t):
+        settings, _ = self.settings()
+        best = None
+        for sc in settings["schedules"]:
+            if not sc["enabled"]:
+                continue
+            for at, ymd in schedule_occurrences(sc, t, 7):
+                if at <= t or self.s.q("SELECT 1 FROM sessions WHERE uid=?", (schedule_uid(sc["id"], ymd),)):
+                    continue
+                if best is None or at < best["at"]:
+                    best = {"at": at, "date": ymd, "schedule_id": sc["id"], "minutes": sc["minutes"], "lead": sc["lead"]}
+                break
+        return best
+
+    # ---- stats
+
+    def stats(self, t=None):
+        t = t or now()
+        today = local_midnight(t)
+        week = today - (datetime.fromtimestamp(t).isoweekday() - 1) * 86400
+        week = local_midnight(week + 7200)  # tolerate DST shifts
+        first = min(week, today - 6 * 86400)
+        burns = []
+        for r in self.s.q("SELECT * FROM sessions WHERE deleted=0 AND started_at < ? AND ends_at > ?", (t, first)):
+            end = min(r["ends_at"], r["stopped_at"] or r["ends_at"], t)
+            if end > r["started_at"]:
+                burns.append((r["started_at"], end))
+
+        def burned(a, b):
+            return sum(max(0, min(e, b) - max(s, a)) for s, e in burns)
+
+        days = []
+        for n in range(6, -1, -1):
+            d0 = local_midnight(today - n * 86400 + 7200)
+            d1 = local_midnight(d0 + 30 * 3600)
+            days.append({"date": datetime.fromtimestamp(d0).strftime("%Y-%m-%d"), "seconds": burned(d0, d1)})
+        settings, _ = self.settings()
+        return {
+            "today": burned(today, t + 1), "week": burned(week, t + 1),
+            "goals": settings["goals"], "days": days,
+        }
+
+    # ---- state
+
+    def ignite_state(self):
+        t = now()
+        phase, row = self.current(t)
+        enforcers = [
+            {**e, "status": json.loads(e["status"]), "age": t - e["last_seen"]}
+            for e in self.s.q("SELECT * FROM enforcers ORDER BY host")
+        ]
+        state = {
+            "now": t, "phase": phase, "active": phase == "burning", "enforcers": enforcers,
+            "session": self.session_out(row) if row else None,
+            "next_schedule": self.next_schedule(t), "stats": self.stats(t),
+        }
+        if row:
+            planned = row["planned"] or row["minutes"]
+            state.update(
+                # Flat fields kept for the enforcers and older clients.
+                session_id=row["uid"], minutes=row["minutes"], started_at=row["started_at"],
+                ends_at=row["ends_at"], can_stop=planned > EARLY_STOP_OVER_MINUTES,
+            )
+        return state
 
     def heartbeat(self, body):
         host = str(body.get("host") or "")[:64]
@@ -199,6 +520,79 @@ class App:
             (host, now(), status),
         )
         return self.ignite_state()
+
+    # ---- sync (Android app)
+
+    def sync(self, body):
+        try:
+            since = int(body.get("since") or 0)
+        except (TypeError, ValueError):
+            raise ApiError(400, "bad since")
+        with self.s.lock:
+            for it in body.get("items") or []:
+                self.merge_item(it)
+            for se in body.get("sessions") or []:
+                self.merge_session(se)
+            st = body.get("settings")
+            if st and isinstance(st.get("value"), dict):
+                _, cur_at = self.settings()
+                if int(st.get("updated_at") or 0) > cur_at:
+                    self.put_settings(st["value"], int(st["updated_at"]))
+            out = {
+                "rev": self.s.rev(), "now": now(),
+                "items": [self.item_out(r) for r in self.s.q("SELECT * FROM items WHERE rev > ?", (since,))],
+                "sessions": [self.session_out(r) for r in self.s.q("SELECT * FROM sessions WHERE rev > ?", (since,))],
+            }
+            row = self.s.q("SELECT * FROM kv WHERE key='settings' AND rev > ?", (since,))
+            if row:
+                out["settings"] = {"value": json.loads(row[0]["value"]), "updated_at": row[0]["updated_at"]}
+        return out
+
+    def merge_item(self, it):
+        uid = str(it.get("id") or "")[:40]
+        if not uid:
+            return
+        incoming_at = int(it.get("updated_at") or 0)
+        cur = self.s.q("SELECT updated_at FROM items WHERE uid=?", (uid,))
+        if cur and cur[0]["updated_at"] >= incoming_at:
+            return
+        try:
+            f = clean_item(it, partial=bool(cur))
+        except ApiError:
+            return
+        f.setdefault("created_at", now())
+        f.update(updated_at=incoming_at, deleted=1 if it.get("deleted") else 0, rev=self.s.next_rev())
+        if cur:
+            self.s.x(f"UPDATE items SET {', '.join(f'{k}=?' for k in f)} WHERE uid=?", [*f.values(), uid])
+        else:
+            f.setdefault("list", "need")
+            f["uid"] = uid
+            self.s.x(f"INSERT INTO items ({', '.join(f)}) VALUES ({', '.join('?' for _ in f)})", list(f.values()))
+
+    def merge_session(self, se):
+        uid = str(se.get("id") or "")[:40]
+        if not uid:
+            return
+        incoming_at = int(se.get("updated_at") or 0)
+        cur = self.s.q("SELECT updated_at FROM sessions WHERE uid=?", (uid,))
+        if cur and cur[0]["updated_at"] >= incoming_at:
+            return
+        f = clean_session(se)
+        if "starts_at" in f:
+            f["started_at"] = f.pop("starts_at")
+        if not cur and not all(k in f for k in ("minutes", "started_at", "ends_at")):
+            return
+        f.update(updated_at=incoming_at, deleted=1 if se.get("deleted") else 0, rev=self.s.next_rev())
+        if cur:
+            self.s.x(f"UPDATE sessions SET {', '.join(f'{k}=?' for k in f)} WHERE uid=?", [*f.values(), uid])
+        else:
+            f["uid"] = uid
+            f.setdefault("planned", f["minutes"])
+            f.setdefault("created_at", now())
+            self.s.x(f"INSERT INTO sessions ({', '.join(f)}) VALUES ({', '.join('?' for _ in f)})", list(f.values()))
+
+
+# ---------------------------------------------------------------- http
 
 
 def make_handler(app):
@@ -227,30 +621,48 @@ def make_handler(app):
                 raise ApiError(400, "bad json")
 
         def route(self, method):
-            path = urlparse(self.path).path.rstrip("/") or "/"
+            url = urlparse(self.path)
+            path = url.path.rstrip("/") or "/"
             parts = path.strip("/").split("/")
             if parts[0] != "api":
                 if method != "GET":
                     raise ApiError(405, "method not allowed")
                 return self.static(path)
-            r = parts[1:]
-            if r == ["items"] and method == "GET":
-                return app.items()
-            if r == ["items"] and method == "POST":
-                return app.create_item(self.body())
-            if len(r) == 2 and r[0] == "items" and r[1].isdigit():
-                rid = int(r[1])
-                if method == "PATCH":
-                    return app.update_item(rid, self.body())
-                if method == "DELETE":
-                    return app.delete_item(rid)
-            if r == ["ignite"] and method == "GET":
-                return app.ignite_state()
-            if r == ["ignite"] and method == "POST":
-                return app.ignite(self.body())
-            if r == ["ignite", "stop"] and method == "POST":
-                return app.stop()
-            if r == ["enforcer", "heartbeat"] and method == "POST":
+            r, m = parts[1:], method
+            if r == ["items"]:
+                if m == "GET":
+                    return app.items()
+                if m == "POST":
+                    return app.create_item(self.body())
+            if len(r) == 2 and r[0] == "items":
+                if m == "PATCH":
+                    return app.update_item(r[1], self.body())
+                if m == "DELETE":
+                    return app.delete_item(r[1])
+            if r == ["ignite"]:
+                if m == "GET":
+                    return app.ignite_state()
+                if m == "POST":
+                    return app.ignite(self.body())
+            if len(r) == 2 and r[0] == "ignite" and m == "POST":
+                actions = {
+                    "stop": lambda: app.stop(), "scrub": lambda: app.scrub(), "now": lambda: app.ignite_now(),
+                    "extend": lambda: app.extend(self.body()), "skip": lambda: app.skip(self.body()),
+                }
+                if r[1] in actions:
+                    return actions[r[1]]()
+            if r == ["settings"]:
+                if m == "GET":
+                    return app.settings()[0]
+                if m == "PUT":
+                    return app.put_settings(self.body())
+            if r == ["stats"] and m == "GET":
+                return app.stats()
+            if r == ["sync"] and m == "POST":
+                return app.sync(self.body())
+            if r == ["ping"] and m == "GET":
+                return {"ignition": True, "now": now(), "rev": app.s.rev()}
+            if r == ["enforcer", "heartbeat"] and m == "POST":
                 return app.heartbeat(self.body())
             raise ApiError(404, "not found")
 
@@ -287,6 +699,9 @@ def make_handler(app):
         def do_POST(self):
             self.handle_method("POST")
 
+        def do_PUT(self):
+            self.handle_method("PUT")
+
         def do_PATCH(self):
             self.handle_method("PATCH")
 
@@ -294,6 +709,15 @@ def make_handler(app):
             self.handle_method("DELETE")
 
     return Handler
+
+
+def scheduler(app):
+    while True:
+        try:
+            app.run_schedules()
+        except Exception as e:  # noqa: BLE001
+            print(f"schedule check failed: {e}", flush=True)
+        time.sleep(15)
 
 
 def main():
@@ -307,6 +731,7 @@ def main():
     )
     a = p.parse_args()
     app = App(Store(a.db))
+    threading.Thread(target=scheduler, args=(app,), daemon=True).start()
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(app))
     print(f"ignition on http://{a.host}:{a.port} db={a.db}", flush=True)
     srv.serve_forever()

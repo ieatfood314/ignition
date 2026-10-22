@@ -3,16 +3,26 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+// Inside the Android app the API is served by the app itself through a JS bridge.
+const NATIVE = window.IgnitionNative || null;
+if (NATIVE) document.documentElement.classList.add("in-app");
+
 const state = {
   items: [],
-  ignite: { active: false, enforcers: [] },
+  ignite: { phase: "idle", active: false, enforcers: [] },
   clockOffset: 0,
   page: "need",
   expanded: new Set(),
   pendingDelete: new Map(),
+  sort: { need: localStorage.getItem("ignition.sort.need") || "smart", want: localStorage.getItem("ignition.sort.want") || "smart" },
 };
 
 async function api(method, path, body) {
+  if (NATIVE) {
+    const res = JSON.parse(NATIVE.request(method, path, body ? JSON.stringify(body) : ""));
+    if (res.status >= 400) throw new Error((res.body && res.body.error) || `Error ${res.status}`);
+    return res.body;
+  }
   const res = await fetch(path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : {},
@@ -23,6 +33,8 @@ async function api(method, path, body) {
   return data;
 }
 
+$$("path.flame").forEach((p) => p.setAttribute("d", window.FLAME_PATH || ""));
+
 /* ---------------- formatting ---------------- */
 
 const DAY = 86400000;
@@ -32,6 +44,13 @@ const parseDate = (s) => { const [y, m, d] = s.split("-").map(Number); return ne
 
 function fmtEstimate(min) {
   if (min == null) return "";
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+function fmtDuration(sec) {
+  const min = Math.round(sec / 60);
   if (min < 60) return `${min}m`;
   const h = Math.floor(min / 60), m = min % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
@@ -65,11 +84,22 @@ function fmtClock(sec) {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+function fmtWhen(ts) {
+  const d = new Date(ts * 1000);
+  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - startOfToday()) / DAY);
+  const day = days === 0 ? "" : days === 1 ? "tomorrow " : d.toLocaleDateString(undefined, { weekday: "short" }) + " ";
+  return day + fmtTime(ts);
+}
+
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
 
 const ICON_CHECK = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 const ICON_PLUS = '<svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>';
 const ICON_NOTE = '<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 9h6M9 13h6M9 17h3"/></svg>';
+const ICON_SORT = '<svg viewBox="0 0 24 24"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>';
 
 /* ---------------- toast ---------------- */
 
@@ -149,18 +179,72 @@ function buildFields(container, list, values, onChange) {
   return () => v;
 }
 
-/* ---------------- lists ---------------- */
+/* ---------------- sorting ---------------- */
 
-function sortItems(list, items) {
-  if (list === "need") {
-    return items.sort((a, b) =>
-      (a.due ? 0 : 1) - (b.due ? 0 : 1) ||
-      (a.due && b.due ? a.due.localeCompare(b.due) : 0) ||
-      b.priority - a.priority ||
-      a.created_at - b.created_at);
-  }
-  return items.sort((a, b) => b.priority - a.priority || a.created_at - b.created_at);
+const SORTS = {
+  smart: "Smart",
+  due: "Due date",
+  time: "Quickest first",
+  priority: "Priority",
+  oldest: "Oldest first",
+  newest: "Newest first",
+  alpha: "A–Z",
+};
+
+const nullsLast = (a, b, cmp) => (a == null) - (b == null) || (a != null && b != null ? cmp(a, b) : 0);
+const byDue = (a, b) => nullsLast(a.due, b.due, (x, y) => x.localeCompare(y));
+const byTime = (a, b) => nullsLast(a.estimate_min, b.estimate_min, (x, y) => x - y);
+const byPri = (a, b) => b.priority - a.priority;
+const byOld = (a, b) => a.created_at - b.created_at;
+
+function sortItems(list, items, mode = state.sort[list]) {
+  const cmp = {
+    smart: list === "need" ? [byDue, byPri, byOld] : [byPri, byOld],
+    due: [byDue, byPri, byOld],
+    time: [byTime, byPri, byOld],
+    priority: list === "need" ? [byPri, byDue, byOld] : [byPri, byOld],
+    oldest: [byOld],
+    newest: [(a, b) => b.created_at - a.created_at],
+    alpha: [(a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" })],
+  }[mode] || [byOld];
+  return items.sort((a, b) => { for (const c of cmp) { const r = c(a, b); if (r) return r; } return 0; });
 }
+
+function paintSortButtons() {
+  $$(".sort-btn").forEach((b) => {
+    const mode = state.sort[b.dataset.sortFor];
+    b.innerHTML = `${ICON_SORT}<span>${SORTS[mode]}</span>`;
+    b.classList.toggle("on", mode !== "smart");
+  });
+}
+
+function openSortMenu(btn) {
+  const list = btn.dataset.sortFor;
+  const menu = $("#sort-menu");
+  menu.innerHTML = Object.entries(SORTS)
+    .filter(([k]) => !(list === "want" && k === "due"))
+    .map(([k, label]) => `<button type="button" role="menuitemradio" aria-checked="${state.sort[list] === k}" data-mode="${k}">${label}</button>`)
+    .join("");
+  $$("button", menu).forEach((b) => b.onclick = () => {
+    state.sort[list] = b.dataset.mode;
+    localStorage.setItem(`ignition.sort.${list}`, b.dataset.mode);
+    closeSortMenu();
+    paintSortButtons();
+    renderLists(true);
+  });
+  const r = btn.getBoundingClientRect();
+  menu.hidden = false;
+  menu.style.top = `${r.bottom + window.scrollY + 6}px`;
+  menu.style.left = `${Math.max(12, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 12))}px`;
+}
+const closeSortMenu = () => { $("#sort-menu").hidden = true; };
+$$(".sort-btn").forEach((b) => b.addEventListener("click", (e) => {
+  e.stopPropagation();
+  $("#sort-menu").hidden ? openSortMenu(b) : closeSortMenu();
+}));
+document.addEventListener("click", (e) => { if (!e.target.closest("#sort-menu")) closeSortMenu(); });
+
+/* ---------------- lists ---------------- */
 
 function metaHtml(it) {
   const bits = [];
@@ -247,7 +331,8 @@ function renderLists(force) {
 }
 
 function renderUpNext() {
-  const next = sortItems("need", state.items.filter((i) => i.list === "need" && !i.done_at && !state.pendingDelete.has(i.id))).slice(0, 3);
+  const open = state.items.filter((i) => i.list === "need" && !i.done_at && !state.pendingDelete.has(i.id));
+  const next = sortItems("need", open, "smart").slice(0, 3);
   const box = $("#up-next");
   box.hidden = next.length === 0;
   $("ul", box).innerHTML = next.map((it) => {
@@ -359,12 +444,16 @@ const RING = 2 * Math.PI * 92;
 const serverNow = () => Date.now() / 1000 + state.clockOffset;
 let arming = null;
 
-function setIgnite(s) {
+function setIgnite(s, quiet) {
   const was = state.ignite;
   state.clockOffset = s.now - Date.now() / 1000;
   state.ignite = s;
-  if (was.active && !s.active && was.session_id && !state.stopping && serverNow() >= was.ends_at - 2) {
-    toast(`Session complete. ${was.minutes} min.`, null, null, 8000);
+  if (!quiet && was.session && was.phase === "countdown" && s.phase === "burning" && s.session && s.session.id === was.session.id) {
+    toast("Liftoff.");
+    if (navigator.vibrate) navigator.vibrate([60, 60, 200]);
+  }
+  if (!quiet && was.phase === "burning" && s.phase === "idle" && !state.stopping && serverNow() >= was.session.ends_at - 2) {
+    toast(`MECO. ${was.session.minutes} min burned.`, null, null, 8000);
     if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
   }
   state.stopping = false;
@@ -375,28 +464,56 @@ async function loadIgnite() {
   try { setIgnite(await api("GET", "/api/ignite")); } catch (e) { console.error(e); }
 }
 
+async function igniteAction(path, body, okToast) {
+  try {
+    setIgnite(await api("POST", path, body), true);
+    if (okToast) toast(okToast);
+  } catch (e) { toast(e.message); }
+}
+
 function renderIgnite() {
   const s = state.ignite;
+  const sess = s.session;
+  const t = serverNow();
   const dial = $("#dial");
-  const remaining = s.active ? s.ends_at - serverNow() : 0;
-  dial.classList.toggle("active", !!s.active);
+  const phase = s.phase || (s.active ? "burning" : "idle");
+  dial.classList.toggle("active", phase === "burning");
+  dial.classList.toggle("countdown", phase === "countdown");
   dial.classList.toggle("arming", !!arming);
-  $("#duration").hidden = !!s.active;
-  $("#session-info").hidden = !s.active;
+  $("#launch-params").hidden = phase !== "idle";
+  $("#session-info").hidden = phase === "idle";
   const fill = $("#ring-fill");
   fill.style.strokeDasharray = RING;
+  let tabLabel = "Ignite", barFrac = null;
 
-  if (s.active) {
+  if (phase === "burning") {
+    const remaining = sess.ends_at - t;
+    const total = sess.ends_at - sess.starts_at;
     $("#ignite-label").textContent = fmtClock(remaining);
     $("#ignite-sub").textContent = "burning";
-    fill.style.strokeDashoffset = RING * (1 - remaining / (s.minutes * 60));
-    const until = new Date(s.ends_at * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-    $("#until").textContent = `Locked until ${until}`;
+    fill.style.strokeDashoffset = RING * (1 - remaining / total);
+    $("#until").textContent = `Locked until ${fmtTime(sess.ends_at)}`;
+    $("#extend").hidden = false;
     $("#stop-btn").hidden = !s.can_stop;
     $("#locked-note").hidden = !!s.can_stop;
+    $("#scrub-btn").hidden = true;
+    tabLabel = fmtClock(remaining);
+    barFrac = 1 - remaining / total;
+  } else if (phase === "countdown") {
+    const left = sess.starts_at - t;
+    const total = Math.max(1, sess.starts_at - sess.created_at);
+    $("#ignite-label").textContent = `T–${fmtClock(left)}`;
+    $("#ignite-sub").textContent = "tap to ignite now";
+    fill.style.strokeDashoffset = RING * (1 - Math.min(1, left / total));
+    $("#until").textContent = `Ignition at ${fmtTime(sess.starts_at)} · ${fmtEstimate(sess.minutes)} burn`;
+    $("#extend").hidden = true;
+    $("#stop-btn").hidden = true;
+    $("#locked-note").hidden = true;
+    $("#scrub-btn").hidden = false;
+    tabLabel = `T–${fmtClock(left)}`;
   } else if (arming) {
     $("#ignite-label").textContent = arming.count;
-    $("#ignite-sub").textContent = "tap to cancel";
+    $("#ignite-sub").textContent = "tap to scrub";
     fill.style.strokeDashoffset = RING;
   } else {
     $("#ignite-label").textContent = "IGNITE";
@@ -405,23 +522,52 @@ function renderIgnite() {
   }
 
   const bar = $("#burnbar");
-  bar.hidden = !s.active;
-  if (s.active) $("div", bar).style.width = `${100 * (1 - remaining / (s.minutes * 60))}%`;
+  bar.hidden = barFrac == null;
+  if (barFrac != null) $("div", bar).style.width = `${100 * barFrac}%`;
   const tab = $('.tabs a[data-tab="ignite"]');
-  tab.classList.toggle("burning", !!s.active);
-  $("#tab-ignite-label").textContent = s.active ? fmtClock(remaining) : "Ignite";
+  tab.classList.toggle("burning", phase !== "idle");
+  $("#tab-ignite-label").textContent = tabLabel;
+
+  renderBurnStats(s.stats);
+  renderNextSchedule(s.next_schedule, phase);
 
   $("#enforcers").innerHTML = (s.enforcers || []).map((e) => {
     const stale = e.age > 30;
     const armed = !stale && e.status && e.status.armed;
-    const label = stale ? "offline" : armed ? "locked" : s.active ? "arming…" : "ready";
+    const label = stale ? "offline" : armed ? "locked" : phase === "burning" ? "arming…" : "ready";
     const err = !stale && e.status && e.status.error ? ` title="${esc(e.status.error)}"` : "";
     return `<li class="${stale ? "stale" : armed ? "armed" : "ready"}"${err}>${esc(e.host)} · ${label}${err ? " ⚠" : ""}</li>`;
   }).join("");
 }
 
+function renderBurnStats(st) {
+  const box = $("#burn-stats");
+  if (!st) { box.innerHTML = ""; return; }
+  const goals = st.goals || {};
+  const row = (label, sec, goalMin, unit) => {
+    if (!goalMin) return "";
+    const frac = Math.min(1, sec / 60 / goalMin);
+    const val = unit === "h" ? `${(sec / 3600).toFixed(1).replace(/\.0$/, "")} / ${(goalMin / 60).toFixed(1).replace(/\.0$/, "")} h` : `${Math.round(sec / 60)} / ${goalMin} min`;
+    return `<div class="goal${frac >= 1 ? " met" : ""}"><span class="goal-label">${label}</span><span class="goal-bar"><i style="width:${frac * 100}%"></i></span><span class="goal-val">${val}</span></div>`;
+  };
+  const rows = row("Today", st.today, goals.daily, "m") + row("This week", st.week, goals.weekly, "h");
+  box.innerHTML = rows || `<p class="burned">Burned today ${fmtDuration(st.today)} · this week ${fmtDuration(st.week)} · <button type="button" class="link" id="set-goals">set goals</button></p>`;
+  const sg = $("#set-goals");
+  if (sg) sg.onclick = openSettings;
+}
+
+function renderNextSchedule(ns, phase) {
+  const el = $("#next-sched");
+  if (!ns || phase !== "idle") { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `Next launch ${esc(fmtWhen(ns.at))} · ${fmtEstimate(ns.minutes)} <button type="button" class="link">skip</button>`;
+  $("button", el).onclick = () => igniteAction("/api/ignite/skip", { schedule_id: ns.schedule_id, date: ns.date }, "Launch window skipped.");
+}
+
 $("#ignite-btn").addEventListener("click", () => {
-  if (state.ignite.active) return;
+  const phase = state.ignite.phase;
+  if (phase === "burning") return;
+  if (phase === "countdown") { igniteAction("/api/ignite/now", null, "Liftoff."); return; }
   if (arming) {
     clearInterval(arming.timer);
     arming = null;
@@ -429,17 +575,21 @@ $("#ignite-btn").addEventListener("click", () => {
     return;
   }
   const minutes = parseInt($("#minutes").value, 10);
+  const delay = parseInt($("#delay").value || "0", 10) || 0;
   if (!(minutes >= 1 && minutes <= 720)) { toast("Minutes: 1–720"); $("#minutes").focus(); return; }
+  if (!(delay >= 0 && delay <= 1440)) { toast("T-minus: 0–1440 minutes"); $("#delay").focus(); return; }
   localStorage.setItem("ignition.minutes", String(minutes));
-  arming = { count: 3, minutes };
+  localStorage.setItem("ignition.delay", String(delay));
+  arming = { count: 3, minutes, delay };
   arming.timer = setInterval(async () => {
     arming.count -= 1;
     if (arming.count > 0) { renderIgnite(); return; }
     clearInterval(arming.timer);
-    const m = arming.minutes;
+    const { minutes: m, delay: d } = arming;
     arming = null;
     try {
-      setIgnite(await api("POST", "/api/ignite", { minutes: m }));
+      setIgnite(await api("POST", "/api/ignite", { minutes: m, delay: d }), true);
+      toast(d ? `Countdown started. Ignition in T-minus ${d}.` : "Liftoff.");
       if (navigator.vibrate) navigator.vibrate(60);
     } catch (e) {
       toast(e.message);
@@ -449,9 +599,25 @@ $("#ignite-btn").addEventListener("click", () => {
   renderIgnite();
 });
 
-const savedMinutes = localStorage.getItem("ignition.minutes");
-if (savedMinutes) $("#minutes").value = savedMinutes;
-$("#minutes").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#ignite-btn").click(); });
+for (const [id, key] of [["#minutes", "ignition.minutes"], ["#delay", "ignition.delay"]]) {
+  const saved = localStorage.getItem(key);
+  if (saved) $(id).value = saved;
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") $("#ignite-btn").click(); });
+}
+
+$$("[data-extend]").forEach((b) => b.addEventListener("click", () =>
+  igniteAction("/api/ignite/extend", { minutes: Number(b.dataset.extend) }, `Extended ${b.dataset.extend} min.`)));
+$("#scrub-btn").addEventListener("click", () => igniteAction("/api/ignite/scrub", null, "Launch scrubbed."));
+
+$("#info-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const pop = $("#info-pop");
+  pop.hidden = !pop.hidden;
+  $("#info-btn").setAttribute("aria-expanded", String(!pop.hidden));
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#info-pop")) { $("#info-pop").hidden = true; $("#info-btn").setAttribute("aria-expanded", "false"); }
+});
 
 (() => {
   const btn = $("#stop-btn");
@@ -463,7 +629,7 @@ $("#minutes").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#ig
     t = setTimeout(async () => {
       btn.classList.remove("holding");
       state.stopping = true;
-      try { setIgnite(await api("POST", "/api/ignite/stop")); toast("Session ended early."); }
+      try { setIgnite(await api("POST", "/api/ignite/stop"), true); toast("Engines off. Burn ended early."); }
       catch (err) { state.stopping = false; toast(err.message); }
     }, 2000);
   });
@@ -471,20 +637,131 @@ $("#minutes").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#ig
   btn.addEventListener("contextmenu", (e) => e.preventDefault());
 })();
 
+/* ---------------- settings ---------------- */
+
+const settingsDialog = $("#settings-dialog");
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+let appInfo = null;
+
+function scheduleEl(sc) {
+  const li = $("#tpl-schedule").content.firstElementChild.cloneNode(true);
+  li.dataset.id = sc.id;
+  $(".sched-time", li).value = sc.time;
+  $(".sched-min", li).value = sc.minutes;
+  $(".sched-on", li).checked = sc.enabled !== false;
+  $(".sched-lead-min", li).value = sc.lead ?? 5;
+  $(".sched-days", li).innerHTML = DAY_LETTERS.map((l, i) =>
+    `<button type="button" class="${sc.days.includes(i + 1) ? "on" : ""}" data-day="${i + 1}" aria-label="day ${i + 1}">${l}</button>`).join("");
+  $$(".sched-days button", li).forEach((b) => b.onclick = () => b.classList.toggle("on"));
+  $(".sched-del", li).onclick = () => li.remove();
+  return li;
+}
+
+function readSchedules() {
+  return $$("#schedules .schedule").map((li) => ({
+    id: li.dataset.id,
+    time: $(".sched-time", li).value || "09:00",
+    minutes: parseInt($(".sched-min", li).value, 10) || 50,
+    enabled: $(".sched-on", li).checked,
+    lead: parseInt($(".sched-lead-min", li).value || "0", 10) || 0,
+    days: $$(".sched-days button.on", li).map((b) => Number(b.dataset.day)),
+  }));
+}
+
+async function openSettings() {
+  $("#settings-msg").textContent = "";
+  try {
+    const s = await api("GET", "/api/settings");
+    $("#goal-daily").value = s.goals.daily || "";
+    $("#goal-weekly").value = s.goals.weekly ? +(s.goals.weekly / 60).toFixed(1) : "";
+    $("#schedules").replaceChildren(...s.schedules.map(scheduleEl));
+  } catch (e) { $("#settings-msg").textContent = e.message; }
+  if (NATIVE) await loadAppInfo();
+  settingsDialog.showModal();
+}
+
+async function loadAppInfo() {
+  $("#app-settings").hidden = false;
+  try {
+    appInfo = await api("GET", "/native/app");
+    $("#server-url").value = appInfo.server_url || "";
+    paintSyncStatus();
+    $("#dnd-toggle").checked = !!appInfo.dnd.enabled;
+    $("#dnd-hint").textContent = appInfo.dnd.enabled && !appInfo.dnd.granted ? "Needs Do Not Disturb access. Tap the toggle again to grant it." : "";
+    $("#notif-btn").textContent = appInfo.notifications.granted ? "Allowed" : "Allow";
+    $("#notif-btn").disabled = !!appInfo.notifications.granted;
+  } catch (e) { $("#sync-status").textContent = e.message; }
+}
+
+function paintSyncStatus() {
+  const s = appInfo && appInfo.sync;
+  let text = "Not syncing. Everything stays on this phone.";
+  if (appInfo && appInfo.server_url) {
+    text = s && s.last_ok ? `Synced ${fmtWhen(s.last_ok)}` : "Not synced yet";
+    if (s && s.last_error && (!s.last_ok || s.last_error_at > s.last_ok)) text += ` · last try failed: ${s.last_error}`;
+  }
+  $("#sync-status").textContent = text;
+}
+
+$("#settings-btn").onclick = openSettings;
+$("#settings-close").onclick = () => settingsDialog.close();
+settingsDialog.addEventListener("click", (e) => { if (e.target === settingsDialog) settingsDialog.close(); });
+$("#add-schedule").onclick = () => {
+  $("#schedules").append(scheduleEl({ id: randomId(), time: "09:00", minutes: 50, lead: 5, enabled: true, days: [1, 2, 3, 4, 5] }));
+};
+$("#settings-save").onclick = async () => {
+  const body = {
+    goals: {
+      daily: parseInt($("#goal-daily").value || "0", 10) || 0,
+      weekly: Math.round((parseFloat($("#goal-weekly").value || "0") || 0) * 60),
+    },
+    schedules: readSchedules(),
+  };
+  try {
+    await api("PUT", "/api/settings", body);
+    settingsDialog.close();
+    toast("Saved.");
+    loadIgnite();
+  } catch (e) { $("#settings-msg").textContent = e.message; }
+};
+$("#server-test").onclick = async () => {
+  $("#sync-status").textContent = "Checking…";
+  try {
+    appInfo = await api("POST", "/native/app/server", { server_url: $("#server-url").value.trim() });
+    paintSyncStatus();
+    loadItems(); loadIgnite();
+  } catch (e) { $("#sync-status").textContent = e.message; }
+};
+$("#dnd-toggle").onchange = async (e) => {
+  try { appInfo = await api("PUT", "/native/app", { dnd_enabled: e.target.checked }); } catch (err) { toast(err.message); }
+  loadAppInfo();
+};
+$("#notif-btn").onclick = async () => { try { await api("POST", "/native/app/notifications"); } catch (e) { toast(e.message); } };
+
 /* ---------------- routing & lifecycle ---------------- */
 
 function route() {
   const page = ["need", "want", "ignite"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "need";
   state.page = page;
   if (addDialog.open) addDialog.close();
+  closeSortMenu();
   $$(".page").forEach((p) => { p.hidden = p.id !== `page-${page}`; });
   $$(".tabs a").forEach((a) => a.classList.toggle("active", a.dataset.tab === page));
   $("#fab").setAttribute("aria-label", page === "want" ? "Add something you want to do" : "Add something that needs doing");
 }
 
+// Hooks for the Android app.
+window.ignitionRefresh = () => { loadItems(); loadIgnite(); if (settingsDialog.open && NATIVE) loadAppInfo(); };
+window.ignitionBack = () => {
+  if (!$("#sort-menu").hidden) { closeSortMenu(); return true; }
+  for (const d of [addDialog, settingsDialog]) if (d.open) { d.close(); return true; }
+  if (state.page !== "need") { location.hash = "need"; return true; }
+  return false;
+};
+
 window.addEventListener("hashchange", route);
 document.addEventListener("keydown", (e) => {
-  if (addDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (addDialog.open || settingsDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
   if (e.key === "n" || e.key === "+" || e.key === "a") { e.preventDefault(); openAdd(); }
   if (e.key === "1") location.hash = "need";
@@ -495,10 +772,16 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) { loadItems(); loadIgnite(); }
 });
 
+paintSortButtons();
 route();
 loadItems();
 loadIgnite();
 setInterval(() => { if (!document.hidden) loadIgnite(); }, 5000);
 setInterval(() => { if (!document.hidden && !addDialog.open) loadItems(); }, 30000);
-setInterval(() => { if (state.ignite.active) renderIgnite(); }, 1000);
+setInterval(() => {
+  const { phase, session } = state.ignite;
+  if (phase !== "idle" || arming) renderIgnite();
+  const edge = phase === "countdown" ? session.starts_at : phase === "burning" ? session.ends_at : null;
+  if (edge && serverNow() >= edge && !document.hidden) loadIgnite();
+}, 1000);
 setInterval(() => renderLists(), 60000);

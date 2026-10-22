@@ -35,7 +35,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
   background: linear-gradient(var(--bg) 70%, transparent);
 }
 .brand { display: flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; font-weight: 650; letter-spacing: .02em; }
-.brand svg { width: 20px; height: 20px; fill: var(--accent); stroke: none; }
+.brand svg { width: 22px; height: 22px; }
+.brand svg path { fill: var(--accent); stroke: none; }
 .tabs { display: flex; gap: 4px; margin-left: auto; }
 .tabs a {
   display: flex; align-items: center; gap: 8px;
@@ -55,6 +56,7 @@ main { max-width: 820px; margin: 0 auto; padding: 4px 20px 140px; }
 
 /* ---------- list pages ---------- */
 .page-head { display: flex; align-items: baseline; gap: 12px; margin: 12px 0 18px; }
+.page-head .sort-btn { margin-left: auto; align-self: center; }
 h1 { font-size: 28px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
 .count { color: var(--faint); font-variant-numeric: tabular-nums; }
 .empty { color: var(--faint); text-align: center; margin-top: 18vh; }
@@ -274,3 +276,127 @@ dialog.sheet[open] { animation: pop .18s ease-out; }
 .duration input, .est-input { -moz-appearance: textfield; appearance: textfield; }
 .duration input::-webkit-inner-spin-button, .duration input::-webkit-outer-spin-button,
 .est-input::-webkit-inner-spin-button, .est-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ---------- v2: header buttons, sort menu ---------- */
+.icon-btn {
+  width: 38px; height: 38px; border-radius: 50%; border: 0; background: transparent; color: var(--muted);
+  display: grid; place-items: center; padding: 0; flex: none;
+}
+.icon-btn svg { width: 20px; height: 20px; }
+.icon-btn:hover { color: var(--text); background: var(--surface-2); }
+.sort-btn {
+  display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 1px solid var(--line);
+  border-radius: 999px; padding: 5px 11px 5px 9px; font-size: 13px; color: var(--muted);
+}
+.sort-btn svg { width: 14px; height: 14px; }
+.sort-btn.on { color: var(--text); border-color: var(--line-2); }
+.menu {
+  position: absolute; z-index: 45; min-width: 170px; padding: 6px;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.6); animation: pop .14s ease-out;
+}
+.menu button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 9px 12px; border-radius: 9px; font-size: 14.5px; color: var(--muted); }
+.menu button:hover { background: var(--surface-2); color: var(--text); }
+.menu button[aria-checked="true"] { color: var(--accent); }
+
+/* ---------- v2: ignite page ---------- */
+.launch-params { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 26px; }
+.launch-params .duration { margin-top: 0; position: relative; }
+.duration label, .duration > span { min-width: 54px; }
+.duration label { text-align: right; }
+.duration.tminus input { font-size: 18px; padding: 6px; color: var(--muted); }
+.duration.tminus input:focus { color: var(--text); }
+.info-btn {
+  position: absolute; right: -34px; width: 22px; height: 22px; border-radius: 50%; padding: 0;
+  border: 1px solid var(--line-2); background: transparent; color: var(--muted);
+  font: italic 600 12px/1 Georgia, serif;
+}
+.info-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.popover {
+  position: absolute; z-index: 30; top: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  width: min(270px, 80vw); padding: 12px 14px; font-size: 13.5px; line-height: 1.45; color: var(--muted);
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  animation: pop .14s ease-out;
+}
+
+.dial.countdown .ignite-btn { border-color: var(--accent); border-style: dashed; background: #000; box-shadow: none; }
+.dial.countdown .ignite-label { color: var(--text); letter-spacing: .02em; padding-left: 0; font-weight: 300; font-size: clamp(38px, 12vw, 58px); }
+.dial.countdown .ring-fill { opacity: .55; }
+
+.chips.extend { color: var(--faint); font-size: 13px; gap: 8px; }
+.chips.extend button { padding: 5px 12px; }
+.chips.extend button:hover { color: var(--text); border-color: var(--accent); }
+.ghost.small { padding: 7px 14px; font-size: 13.5px; font-weight: 550; border-radius: 999px; }
+.ghost.small:hover { color: var(--text); }
+.link { background: none; border: 0; padding: 0; color: var(--accent); font-size: inherit; text-decoration: underline; text-underline-offset: 3px; }
+
+.burn-stats { width: 100%; max-width: 440px; margin-top: 30px; display: grid; gap: 10px; }
+.burn-stats:empty { display: none; }
+.burned { margin: 0; text-align: center; color: var(--faint); font-size: 13.5px; }
+.goal { display: grid; grid-template-columns: 76px 1fr auto; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.goal-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.goal-bar i { display: block; height: 100%; background: var(--text); border-radius: 2px; transition: width .4s ease; }
+.goal.met .goal-bar i { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+.goal.met .goal-val { color: var(--accent); }
+.next-sched { margin: 14px 0 0; font-size: 13.5px; color: var(--muted); }
+
+/* ---------- v2: settings ---------- */
+dialog.sheet.tall { max-height: 88dvh; overflow-y: auto; }
+.settings-head { display: flex; align-items: center; justify-content: space-between; }
+.settings-head h2 { margin: 0; font-size: 21px; }
+.set-group { margin-top: 22px; }
+.set-group h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--faint); font-weight: 650; margin: 0 0 10px; }
+.set-group h3:not(:first-child) { margin-top: 22px; }
+.hint { color: var(--faint); font-size: 13px; line-height: 1.45; margin: 0 0 10px; }
+.set-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; color: var(--muted); font-size: 14px; }
+.set-row label { width: 70px; }
+.set-row input, .schedule input, .set-row.wide input {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font-size: 15px; min-width: 0;
+}
+.set-row input[type="number"] { width: 90px; }
+.set-row.wide input { flex: 1; }
+.set-row input:focus, .schedule input:focus { outline: none; border-color: var(--accent); }
+.set-row .hint { margin: 0; }
+
+.schedules { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 10px; }
+.schedule { border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 10px; }
+.sched-top { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+.sched-time { color-scheme: dark; }
+.sched-min { width: 66px; }
+.sched-top .switch { margin-left: auto; }
+.sched-days { display: flex; gap: 5px; }
+.sched-days button {
+  width: 32px; height: 32px; border-radius: 50%; padding: 0; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--line); background: transparent; color: var(--faint);
+}
+.sched-days button.on { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
+.sched-lead { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 13px; }
+.sched-lead input { width: 56px; padding: 5px 8px; font-size: 14px; }
+
+.switch { position: relative; width: 40px; height: 24px; flex: none; }
+.switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.switch i { position: absolute; inset: 0; border-radius: 12px; background: var(--line-2); transition: background .15s; pointer-events: none; }
+.switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+.switch input:checked + i { background: var(--accent-dim); }
+.switch input:checked + i::after { transform: translateX(16px); background: var(--accent); }
+
+.toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 15px; }
+.toggle-row input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent); }
+.tasker { margin-top: 10px; }
+.tasker summary { color: var(--muted); font-size: 14px; cursor: pointer; padding: 6px 0; }
+.tasker code { display: block; font-size: 12.5px; color: var(--text); background: var(--surface-2); border-radius: 8px; padding: 8px 10px; margin: 0 0 10px; overflow-wrap: anywhere; }
+.tasker p code { display: inline; padding: 1px 5px; }
+.sheet-actions .hint { margin: 0 auto 0 0; align-self: center; }
+
+@media (max-width: 720px) {
+  .top .icon-btn { margin-left: auto; }
+  .info-btn { right: -30px; }
+}
+
+/* In the Android app the shell handles system bars and there is no browser chrome. */
+.in-app .top { padding-top: 14px; }
+.ghost.small { white-space: nowrap; }
+dialog.sheet.tall .sheet-actions { position: sticky; bottom: -22px; margin: 20px -22px -22px; padding: 14px 22px; background: var(--surface); border-top: 1px solid var(--line); }
+@media (max-width: 720px) {
+  dialog.sheet.tall .sheet-actions { bottom: calc(-18px - var(--safe-b)); margin: 20px -18px calc(-18px - var(--safe-b)); padding: 12px 18px calc(12px + var(--safe-b)); }
+}
