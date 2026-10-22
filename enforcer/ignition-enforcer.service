@@ -1,0 +1,12 @@
+[Unit]
+Description=Ignition enforcer (blocks T3 Code clients and distractions during focus sessions)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -I /usr/local/lib/ignition/ignition-enforcer.py /etc/ignition/enforcer.json
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark">
+  <title>ignition</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="burnbar" hidden><div></div></div>
+
+  <header class="top">
+    <a class="brand" href="#need" aria-label="ignition">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4-3 6-3 10a3 3 0 0 0 6 0c0-1.5-.6-2.6-1.2-3.4C17 10 18 13 18 15a6 6 0 0 1-12 0c0-5 5-7 6-13z"/></svg>
+      <span>ignition</span>
+    </a>
+    <nav class="tabs" aria-label="Pages">
+      <a href="#need" data-tab="need"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Need</span></a>
+      <a href="#want" data-tab="want"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><span>Want</span></a>
+      <a href="#ignite" data-tab="ignite"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M10 2h4"/></svg><span id="tab-ignite-label">Ignite</span></a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="page-need" class="page list-page" data-list="need" hidden>
+      <div class="page-head">
+        <h1>Need to do</h1>
+        <span class="count" id="count-need"></span>
+      </div>
+      <ul class="items" id="items-need"></ul>
+      <p class="empty" id="empty-need" hidden>Nothing due. Suspicious.</p>
+      <details class="done-group" id="done-need" hidden>
+        <summary></summary>
+        <ul class="items done"></ul>
+      </details>
+    </section>
+
+    <section id="page-want" class="page list-page" data-list="want" hidden>
+      <div class="page-head">
+        <h1>Want to do</h1>
+        <span class="count" id="count-want"></span>
+      </div>
+      <ul class="items" id="items-want"></ul>
+      <p class="empty" id="empty-want" hidden>Nothing here yet.</p>
+      <details class="done-group" id="done-want" hidden>
+        <summary></summary>
+        <ul class="items done"></ul>
+      </details>
+    </section>
+
+    <section id="page-ignite" class="page" hidden>
+      <div class="ignite-wrap">
+        <div class="dial" id="dial">
+          <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="ring-track" cx="100" cy="100" r="92"/>
+            <circle class="ring-fill" id="ring-fill" cx="100" cy="100" r="92"/>
+          </svg>
+          <button class="ignite-btn" id="ignite-btn" type="button">
+            <span class="ignite-label" id="ignite-label">IGNITE</span>
+            <span class="ignite-sub" id="ignite-sub"></span>
+          </button>
+        </div>
+
+        <div class="duration" id="duration">
+          <label for="minutes">for</label>
+          <input id="minutes" type="number" inputmode="numeric" min="1" max="720" list="minute-presets" value="50">
+          <datalist id="minute-presets">
+            <option value="25"><option value="45"><option value="50"><option value="60"><option value="90"><option value="120">
+          </datalist>
+          <span>min</span>
+        </div>
+
+        <div class="session-info" id="session-info" hidden>
+          <p class="until" id="until"></p>
+          <button class="hold-btn" id="stop-btn" type="button" hidden><span class="hold-fill"></span><span class="hold-text">Hold to end early</span></button>
+          <p class="locked-note" id="locked-note" hidden>No way out under an hour. Get to work.</p>
+        </div>
+
+        <ul class="enforcers" id="enforcers"></ul>
+
+        <div class="up-next" id="up-next" hidden>
+          <h2>Up next</h2>
+          <ul></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <button class="fab" id="fab" type="button" aria-label="Add">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+
+  <dialog id="add-dialog" class="sheet">
+    <form method="dialog" id="add-form" autocomplete="off">
+      <div class="sheet-grip" aria-hidden="true"></div>
+      <div class="add-row">
+        <input id="add-title" name="title" placeholder="What needs doing?" required maxlength="500" enterkeyhint="done">
+        <button type="button" class="mini-plus" id="add-more" aria-label="Add details" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>
+        </button>
+      </div>
+      <div class="fields" id="add-fields" hidden></div>
+      <div class="sheet-actions">
+        <button type="button" class="ghost" id="add-cancel">Cancel</button>
+        <button type="submit" class="primary" id="add-submit">Add</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <template id="tpl-fields">
+    <div class="field" data-field="estimate_min">
+      <span class="field-label">Time</span>
+      <div class="chips">
+        <button type="button" data-est="15">15m</button>
+        <button type="button" data-est="30">30m</button>
+        <button type="button" data-est="60">1h</button>
+        <button type="button" data-est="120">2h</button>
+        <input type="number" inputmode="numeric" min="0" placeholder="min" class="est-input" aria-label="Minutes">
+      </div>
+    </div>
+    <div class="field" data-field="due">
+      <span class="field-label">Due</span>
+      <div class="chips">
+        <button type="button" data-due="0">Today</button>
+        <button type="button" data-due="1">Tomorrow</button>
+        <input type="date" class="due-input" aria-label="Due date">
+      </div>
+    </div>
+    <div class="field" data-field="priority">
+      <span class="field-label">Priority</span>
+      <div class="seg">
+        <button type="button" data-pri="0">none</button>
+        <button type="button" data-pri="1">low</button>
+        <button type="button" data-pri="2">med</button>
+        <button type="button" data-pri="3">high</button>
+      </div>
+    </div>
+    <div class="field field-notes" data-field="notes">
+      <span class="field-label">Notes</span>
+      <textarea rows="3" placeholder="Links, sub-steps, context…"></textarea>
+    </div>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>
