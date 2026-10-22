@@ -1,0 +1,7 @@
+<resources>
+    <color name="widget_bg">#FFF2F2F2</color>
+    <color name="widget_fg">#FF000000</color>
+    <color name="nothing_red">#FFD71921</color>
+    <color name="icon_bg">#FF1B1B1D</color>
+    <color name="accent">#FFE23A29</color>
+</resources>

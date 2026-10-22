@@ -3,6 +3,12 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+// localStorage can be unavailable (e.g. some WebView/file:// setups); fall back to memory.
+const ls = (() => {
+  try { localStorage.setItem("ignition._probe", "1"); localStorage.removeItem("ignition._probe"); return localStorage; }
+  catch { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; }
+})();
+
 // Inside the Android app the API is served by the app itself through a JS bridge.
 const NATIVE = window.IgnitionNative || null;
 if (NATIVE) document.documentElement.classList.add("in-app");
@@ -14,7 +20,9 @@ const state = {
   page: "need",
   expanded: new Set(),
   pendingDelete: new Map(),
-  sort: { need: localStorage.getItem("ignition.sort.need") || "smart", want: localStorage.getItem("ignition.sort.want") || "smart" },
+  rendered: new Set(),
+  itemsJson: "",
+  sort: { need: ls.getItem("ignition.sort.need") || "smart", want: ls.getItem("ignition.sort.want") || "smart" },
 };
 
 async function api(method, path, body) {
@@ -227,7 +235,7 @@ function openSortMenu(btn) {
     .join("");
   $$("button", menu).forEach((b) => b.onclick = () => {
     state.sort[list] = b.dataset.mode;
-    localStorage.setItem(`ignition.sort.${list}`, b.dataset.mode);
+    ls.setItem(`ignition.sort.${list}`, b.dataset.mode);
     closeSortMenu();
     paintSortButtons();
     renderLists(true);
@@ -261,7 +269,7 @@ function metaHtml(it) {
 
 function itemEl(it) {
   const li = document.createElement("li");
-  li.className = "item" + (it.done_at ? " is-done" : "");
+  li.className = "item" + (it.done_at ? " is-done" : "") + (state.rendered.has(it.id) ? "" : " fresh");
   li.dataset.id = it.id;
   li.dataset.pri = it.priority;
   const open = state.expanded.has(it.id);
@@ -327,6 +335,7 @@ function renderLists(force) {
     $("summary", dg).textContent = `Done · ${done.length}`;
     $("ul", dg).replaceChildren(...done.slice(0, 100).map(itemEl));
   }
+  state.rendered = new Set(state.items.map((i) => i.id));
   renderUpNext();
 }
 
@@ -348,7 +357,11 @@ function upsert(item) {
 
 async function loadItems() {
   try {
-    state.items = await api("GET", "/api/items");
+    const items = await api("GET", "/api/items");
+    const json = JSON.stringify(items);
+    if (json === state.itemsJson) return;
+    state.itemsJson = json;
+    state.items = items;
     renderLists();
   } catch (e) { console.error(e); }
 }
@@ -578,8 +591,8 @@ $("#ignite-btn").addEventListener("click", () => {
   const delay = parseInt($("#delay").value || "0", 10) || 0;
   if (!(minutes >= 1 && minutes <= 720)) { toast("Minutes: 1–720"); $("#minutes").focus(); return; }
   if (!(delay >= 0 && delay <= 1440)) { toast("T-minus: 0–1440 minutes"); $("#delay").focus(); return; }
-  localStorage.setItem("ignition.minutes", String(minutes));
-  localStorage.setItem("ignition.delay", String(delay));
+  ls.setItem("ignition.minutes", String(minutes));
+  ls.setItem("ignition.delay", String(delay));
   arming = { count: 3, minutes, delay };
   arming.timer = setInterval(async () => {
     arming.count -= 1;
@@ -600,7 +613,7 @@ $("#ignite-btn").addEventListener("click", () => {
 });
 
 for (const [id, key] of [["#minutes", "ignition.minutes"], ["#delay", "ignition.delay"]]) {
-  const saved = localStorage.getItem(key);
+  const saved = ls.getItem(key);
   if (saved) $(id).value = saved;
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") $("#ignite-btn").click(); });
 }
@@ -726,6 +739,7 @@ $("#settings-save").onclick = async () => {
 };
 $("#server-test").onclick = async () => {
   $("#sync-status").textContent = "Checking…";
+  await new Promise((r) => setTimeout(r, 50)); // let "Checking…" paint before the blocking native call
   try {
     appInfo = await api("POST", "/native/app/server", { server_url: $("#server-url").value.trim() });
     paintSyncStatus();

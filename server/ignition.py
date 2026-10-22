@@ -542,6 +542,10 @@ class App:
                 "rev": self.s.rev(), "now": now(),
                 "items": [self.item_out(r) for r in self.s.q("SELECT * FROM items WHERE rev > ?", (since,))],
                 "sessions": [self.session_out(r) for r in self.s.q("SELECT * FROM sessions WHERE rev > ?", (since,))],
+                "enforcers": [
+                    {**e, "status": json.loads(e["status"]), "age": now() - e["last_seen"]}
+                    for e in self.s.q("SELECT * FROM enforcers ORDER BY host")
+                ],
             }
             row = self.s.q("SELECT * FROM kv WHERE key='settings' AND rev > ?", (since,))
             if row:

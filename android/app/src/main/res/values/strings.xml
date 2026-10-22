@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Ignition</string>
+    <string name="widget_ignite">Ignite</string>
+    <string name="widget_next">Next up</string>
+    <string name="widget_burn">Burn goals</string>
+    <string name="widget_ignite_desc">Countdown while burning; tap to open the timer</string>
+    <string name="widget_next_desc">The top of your need-to-do list</string>
+    <string name="widget_burn_desc">Today and this week against your burn goals</string>
+</resources>

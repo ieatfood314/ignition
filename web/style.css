@@ -62,10 +62,8 @@ h1 { font-size: 28px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
 .empty { color: var(--faint); text-align: center; margin-top: 18vh; }
 
 .items { list-style: none; margin: 0; padding: 0; }
-.item {
-  border-bottom: 1px solid var(--line);
-  animation: rise .18s ease-out;
-}
+.item { border-bottom: 1px solid var(--line); }
+.item.fresh { animation: rise .18s ease-out; }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
 .item-row { display: flex; align-items: center; gap: 14px; padding: 14px 2px; }
 .check {
