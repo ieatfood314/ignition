@@ -79,16 +79,42 @@ class BlockerService : AccessibilityService() {
         val root = rootInActiveWindow ?: return null
         try {
             for (id in URL_BAR_IDS) {
-                val nodes = root.findAccessibilityNodeInfosByViewId(if (id.contains(":")) id else "$pkg:id/$id")
-                for (n in nodes) {
-                    val t = n.text ?: n.contentDescription
-                    if (!t.isNullOrBlank()) return t.toString()
+                // Classic Android view ids are "pkg:id/name"; Compose testTags (ADDRESSBAR_URL) are the
+                // bare string. Firefox's redesigned toolbar is Compose, so try both forms.
+                val forms = if (id.contains(":")) listOf(id) else listOf(id, "$pkg:id/$id")
+                for (form in forms) {
+                    for (n in root.findAccessibilityNodeInfosByViewId(form)) {
+                        val t = n.text ?: n.contentDescription
+                        if (!t.isNullOrBlank()) return t.toString()
+                    }
                 }
             }
-            return null
+            // Fallback for toolbars we don't have an id for: the editable/url-ish node nearest the top.
+            return scanForUrl(root)
         } finally {
             root.recycle()
         }
+    }
+
+    /** Breadth-first walk for an address-bar-like node (editable, or a url/address/origin view id). */
+    private fun scanForUrl(root: AccessibilityNodeInfo): String? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 500) {
+            val n = queue.removeFirst()
+            seen++
+            val vid = n.viewIdResourceName?.lowercase() ?: ""
+            val looksUrl = n.isEditable ||
+                (n.className?.contains("EditText") == true) ||
+                vid.contains("url") || vid.contains("address") || vid.contains("origin")
+            if (looksUrl) {
+                val t = n.text ?: n.contentDescription
+                if (!t.isNullOrBlank()) return t.toString()
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return null
     }
 
     // ---- "every game"
