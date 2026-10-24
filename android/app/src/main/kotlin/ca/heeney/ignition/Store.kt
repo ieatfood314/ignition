@@ -36,7 +36,7 @@ class Store private constructor(private val file: File) {
         val root = runCatching { JSONObject(file.readText()) }.getOrNull() ?: return
         root.optJSONArray("items")?.let { arr -> for (i in 0 until arr.length()) arr.getJSONObject(i).let { items[it.getString("id")] = it } }
         root.optJSONArray("sessions")?.let { arr -> for (i in 0 until arr.length()) arr.getJSONObject(i).let { sessions[it.getString("id")] = it } }
-        root.optJSONObject("settings")?.let { settings = it }
+        root.optJSONObject("settings")?.let { settings = Logic.cleanSettings(it) }
         settingsUpdatedAt = root.optLong("settings_updated_at")
         settingsDirty = root.optBoolean("settings_dirty")
         root.optJSONArray("dirty_items")?.let { arr -> for (i in 0 until arr.length()) dirtyItems.add(arr.getString(i)) }
@@ -111,9 +111,7 @@ class Store private constructor(private val file: File) {
         /** A standalone store backed by [file], for unit tests. */
         fun open(file: File): Store = Store(file).also { it.load() }
 
-        fun defaultSettings(): JSONObject = JSONObject()
-            .put("goals", JSONObject().put("daily", 0).put("weekly", 0))
-            .put("schedules", JSONArray())
+        fun defaultSettings(): JSONObject = Logic.cleanSettings(JSONObject())
 
         private val random = SecureRandom()
         fun newId(): String = ByteArray(8).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }

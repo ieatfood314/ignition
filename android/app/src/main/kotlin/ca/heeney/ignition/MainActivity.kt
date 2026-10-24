@@ -3,6 +3,7 @@ package ca.heeney.ignition
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -18,6 +19,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.Toast
+import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 
@@ -156,13 +159,44 @@ class MainActivity : Activity() {
                 )
                 .put("dnd", JSONObject().put("enabled", p.getBoolean("dnd_enabled", false)).put("granted", Reactor.dndGranted(this)))
                 .put("notifications", JSONObject().put("granted", notificationsGranted()))
+                .put("blocker", JSONObject().put("enabled", BlockerService.enabled(this)))
+                .put("ring", JSONObject().put("enabled", p.getBoolean("ring_enabled", false)).put("full_screen", canFullScreen()))
+                .put(
+                    "launch_window",
+                    JSONObject().put("home", LaunchWindow.homeGateway(this) ?: JSONObject.NULL)
+                        .put("here", LaunchWindow.homeGateway(this) != null && LaunchWindow.currentWifiGateway(this) == LaunchWindow.homeGateway(this)),
+                )
                 .put("version", packageManager.getPackageInfo(packageName, 0).versionName)
         }
+    }
+
+    private fun canFullScreen(): Boolean =
+        Build.VERSION.SDK_INT < 34 || getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+
+    private fun appList(): JSONArray {
+        val pm = packageManager
+        val games = BlockerService.gamePackages(this)
+        val out = ArrayList<JSONObject>()
+        for (app in pm.getInstalledApplications(0)) {
+            if (app.packageName == packageName) continue
+            // Launchable apps the user would recognise, plus anything flagged as a game.
+            val launchable = pm.getLaunchIntentForPackage(app.packageName) != null
+            val game = app.packageName in games
+            if (!launchable && !game) continue
+            out.add(
+                JSONObject().put("id", app.packageName)
+                    .put("label", pm.getApplicationLabel(app).toString())
+                    .put("game", game),
+            )
+        }
+        out.sortBy { it.optString("label").lowercase() }
+        return JSONArray(out)
     }
 
     private fun native(method: String, path: String, body: JSONObject): Any {
         val store = Store.get(this)
         return when {
+            path == "/native/apps" && method == "GET" -> appList()
             path == "/native/app" && method == "GET" -> appInfo()
             path == "/native/app" && method == "PUT" -> {
                 if (body.has("dnd_enabled")) {
@@ -172,6 +206,24 @@ class MainActivity : Activity() {
                         startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
                     }
                 }
+                if (body.has("ring_enabled")) {
+                    val on = body.optBoolean("ring_enabled")
+                    Reactor.prefs(this).edit().putBoolean("ring_enabled", on).apply()
+                    if (on && !canFullScreen()) {
+                        startActivity(
+                            Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
+                                .setData(android.net.Uri.parse("package:$packageName")),
+                        )
+                    }
+                }
+                if (body.optString("home_wifi") == "current" && !LaunchWindow.setHomeToCurrent(this)) {
+                    throw ApiError(400, "Not on Wi-Fi right now, or no gateway found.")
+                }
+                appInfo()
+            }
+            path == "/native/app/blocker" && method == "POST" -> {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                Toast.makeText(this, "Turn on Ignition under Installed apps.", Toast.LENGTH_LONG).show()
                 appInfo()
             }
             path == "/native/app/server" && method == "POST" -> {

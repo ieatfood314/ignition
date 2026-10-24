@@ -11,11 +11,12 @@ const ls = (() => {
 
 // Inside the Android app the API is served by the app itself through a JS bridge.
 const NATIVE = window.IgnitionNative || null;
-if (NATIVE) document.documentElement.classList.add("in-app");
+document.documentElement.classList.add(NATIVE ? "in-app" : "in-web");
 
 const state = {
   items: [],
   ignite: { phase: "idle", active: false, enforcers: [] },
+  settings: null,
   clockOffset: 0,
   page: "need",
   expanded: new Set(),
@@ -465,8 +466,9 @@ function setIgnite(s, quiet) {
     toast("Liftoff.");
     if (navigator.vibrate) navigator.vibrate([60, 60, 200]);
   }
-  if (!quiet && was.phase === "burning" && s.phase === "idle" && !state.stopping && serverNow() >= was.session.ends_at - 2) {
-    toast(`MECO. ${was.session.minutes} min burned.`, null, null, 8000);
+  if (!quiet && was.phase === "burning" && s.phase === "idle" && !state.stopping &&
+      serverNow() >= was.session.ends_at - 2 && serverNow() - was.session.ends_at < 15 * 60) {
+    showCutoff(was.session);
     if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
   }
   state.stopping = false;
@@ -543,6 +545,7 @@ function renderIgnite() {
 
   renderBurnStats(s.stats);
   renderNextSchedule(s.next_schedule, phase);
+  renderWindowNote(phase);
 
   $("#enforcers").innerHTML = (s.enforcers || []).map((e) => {
     const stale = e.age > 30;
@@ -575,6 +578,39 @@ function renderNextSchedule(ns, phase) {
   el.hidden = false;
   el.innerHTML = `Next launch ${esc(fmtWhen(ns.at))} · ${fmtEstimate(ns.minutes)} <button type="button" class="link">skip</button>`;
   $("button", el).onclick = () => igniteAction("/api/ignite/skip", { schedule_id: ns.schedule_id, date: ns.date }, "Launch window skipped.");
+}
+
+/** The launch window (Settings › Launch window), if it's open right now. */
+function openWindow() {
+  const lw = state.settings && state.settings.launch_window;
+  if (!lw || !lw.enabled) return null;
+  const d = new Date(serverNow() * 1000);
+  if (!lw.days.includes(d.getDay() || 7)) return null;
+  const at = (hm) => { const [h, m] = hm.split(":").map(Number); const x = new Date(d); x.setHours(h, m, 0, 0); return x.getTime() / 1000; };
+  const t = d.getTime() / 1000;
+  return t >= at(lw.start) && t < at(lw.end) ? { ...lw, until: at(lw.end) } : null;
+}
+
+function renderWindowNote(phase) {
+  const el = $("#window-note");
+  const lw = phase === "idle" && !arming ? openWindow() : null;
+  el.hidden = !lw;
+  if (!lw) return;
+  const label = lw.tminus ? `Start T-minus ${lw.tminus}` : "Ignite now";
+  const key = `${lw.until}|${label}|${lw.minutes}`;
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  el.innerHTML = `Launch window open until ${esc(fmtTime(lw.until))}. <button type="button" class="link">${esc(label)}</button> <span>· ${fmtEstimate(lw.minutes)} burn</span>`;
+  $("button", el).onclick = async () => {
+    try {
+      setIgnite(await api("POST", "/api/ignite", { minutes: lw.minutes, delay: lw.tminus }), true);
+      toast(lw.tminus ? `Countdown started. Ignition in T-minus ${lw.tminus}.` : "Liftoff.");
+    } catch (e) { toast(e.message); }
+  };
+}
+
+async function loadSettings() {
+  try { state.settings = await api("GET", "/api/settings"); renderIgnite(); } catch (e) { console.error(e); }
 }
 
 $("#ignite-btn").addEventListener("click", () => {
@@ -655,6 +691,28 @@ document.addEventListener("click", (e) => {
 const settingsDialog = $("#settings-dialog");
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 let appInfo = null;
+let settingsDoc = null;   // the shared settings document as last loaded or saved
+let editBlock = null;     // the block lists being edited
+let installedApps = null;
+let settingsPage = "home";
+
+const fmtHm = (hm) => { const [h, m] = hm.split(":").map(Number); return fmtTime(new Date(2000, 0, 1, h, m).getTime() / 1000); };
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function dayButtons(container, days) {
+  container.innerHTML = DAY_LETTERS.map((l, i) =>
+    `<button type="button" class="${days.includes(i + 1) ? "on" : ""}" data-day="${i + 1}" aria-label="day ${i + 1}">${l}</button>`).join("");
+  $$("button", container).forEach((b) => b.onclick = () => { b.classList.toggle("on"); paintSummaries(); });
+}
+const readDays = (container) => $$("button.on", container).map((b) => Number(b.dataset.day));
+
+function fmtDays(days) {
+  const k = [...days].sort().join("");
+  if (k === "1234567") return "Every day";
+  if (k === "12345") return "Weekdays";
+  if (k === "67") return "Weekends";
+  return days.map((d) => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d - 1]).join(", ");
+}
 
 function scheduleEl(sc) {
   const li = $("#tpl-schedule").content.firstElementChild.cloneNode(true);
@@ -663,10 +721,8 @@ function scheduleEl(sc) {
   $(".sched-min", li).value = sc.minutes;
   $(".sched-on", li).checked = sc.enabled !== false;
   $(".sched-lead-min", li).value = sc.lead ?? 5;
-  $(".sched-days", li).innerHTML = DAY_LETTERS.map((l, i) =>
-    `<button type="button" class="${sc.days.includes(i + 1) ? "on" : ""}" data-day="${i + 1}" aria-label="day ${i + 1}">${l}</button>`).join("");
-  $$(".sched-days button", li).forEach((b) => b.onclick = () => b.classList.toggle("on"));
-  $(".sched-del", li).onclick = () => li.remove();
+  dayButtons($(".sched-days", li), sc.days);
+  $(".sched-del", li).onclick = () => { li.remove(); paintSummaries(); };
   return li;
 }
 
@@ -677,24 +733,215 @@ function readSchedules() {
     minutes: parseInt($(".sched-min", li).value, 10) || 50,
     enabled: $(".sched-on", li).checked,
     lead: parseInt($(".sched-lead-min", li).value || "0", 10) || 0,
-    days: $$(".sched-days button.on", li).map((b) => Number(b.dataset.day)),
+    days: readDays($(".sched-days", li)),
   }));
 }
+
+/* ---- launch window */
+
+function fillWindow(lw) {
+  $("#lw-on").checked = lw.enabled;
+  dayButtons($("#lw-days"), lw.days);
+  $("#lw-start").value = lw.start;
+  $("#lw-end").value = lw.end;
+  $("#lw-after").value = lw.after;
+  $("#lw-minutes").value = lw.minutes;
+  $("#lw-tminus").value = lw.tminus;
+  setTrigger(lw.trigger);
+}
+
+function setTrigger(trigger) {
+  $$("#lw-trigger button").forEach((b) => b.classList.toggle("on", b.dataset.trigger === trigger));
+  $("#lw-home").hidden = trigger !== "home";
+  paintHome();
+}
+
+function readWindow() {
+  const num = (id, d) => { const n = parseInt($(id).value, 10); return Number.isFinite(n) ? n : d; };
+  return {
+    enabled: $("#lw-on").checked,
+    days: readDays($("#lw-days")),
+    start: $("#lw-start").value || "15:00",
+    end: $("#lw-end").value || "17:30",
+    trigger: ($("#lw-trigger button.on") || { dataset: { trigger: "home" } }).dataset.trigger,
+    after: num("#lw-after", 20),
+    minutes: num("#lw-minutes", 50),
+    tminus: num("#lw-tminus", 10),
+  };
+}
+
+function paintHome() {
+  const el = $("#lw-home-text");
+  if (!NATIVE) { el.textContent = "Your phone works out when you're home, from its Wi-Fi. Pick the network in the Android app."; return; }
+  const h = appInfo && appInfo.launch_window;
+  if (!h || !h.home) { el.textContent = "Home Wi-Fi isn't set yet. Tap below while you're on it."; return; }
+  el.textContent = `Home Wi-Fi: ${h.home}${h.here ? " (connected)" : ""}`;
+}
+
+$$("#lw-trigger button").forEach((b) => b.onclick = () => { setTrigger(b.dataset.trigger); paintSummaries(); });
+$("#lw-on").onchange = () => { $("#lw-body").classList.toggle("off", !$("#lw-on").checked); paintSummaries(); };
+$("#lw-home-set").onclick = async () => {
+  try { appInfo = await api("PUT", "/native/app", { home_wifi: "current" }); paintHome(); }
+  catch (e) { toast(e.message); }
+};
+
+/* ---- blocking */
+
+function tagEl(label, title, onRemove) {
+  const li = $("#tpl-tag").content.firstElementChild.cloneNode(true);
+  $(".tag-label", li).textContent = label;
+  if (title) li.title = title;
+  $(".tag-x", li).onclick = onRemove;
+  return li;
+}
+
+function renderBlock() {
+  const b = editBlock;
+  $("#block-sites").replaceChildren(...b.sites.map((s) => tagEl(s, null, () => { b.sites = b.sites.filter((x) => x !== s); renderBlock(); })));
+  $("#block-programs").replaceChildren(...b.programs.map((p) => tagEl(p, null, () => { b.programs = b.programs.filter((x) => x !== p); renderBlock(); })));
+  const apps = [...b.apps].sort((x, y) => x.label.localeCompare(y.label));
+  $("#block-apps").replaceChildren(...apps.map((a) => tagEl(a.label, a.id, () => { b.apps = b.apps.filter((x) => x.id !== a.id); renderBlock(); })));
+  $("#block-games").checked = b.games;
+  paintSummaries();
+}
+
+function cleanSite(v) {
+  let s = v.trim().toLowerCase().replace(/^[a-z]+:\/\//, "").split(/[/?#]/)[0].split("@").pop().replace(/^\.+|\.+$/g, "");
+  if (s.startsWith("www.")) s = s.slice(4);
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(s) ? s : null;
+}
+
+function tagForm(form, add) {
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("input", form);
+    const bits = input.value.split(/[\s,]+/).filter(Boolean);
+    const bad = bits.filter((v) => !add(v));
+    input.value = bad.join(" ");
+    if (bad.length) toast(`Not sure what "${bad[0]}" is.`);
+    renderBlock();
+  });
+}
+tagForm($("#block-sites-add"), (v) => { const s = cleanSite(v); if (s && !editBlock.sites.includes(s)) editBlock.sites.push(s); return !!s; });
+tagForm($("#block-programs-add"), (v) => {
+  if (!/^[A-Za-z0-9._+-]{1,64}$/.test(v)) return false;
+  if (!editBlock.programs.includes(v)) editBlock.programs.push(v);
+  return true;
+});
+tagForm($("#block-apps-add"), (v) => {
+  if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(v)) return false;
+  if (!editBlock.apps.some((a) => a.id === v)) editBlock.apps.push({ id: v, label: v });
+  return true;
+});
+$("#block-games").onchange = (e) => { editBlock.games = e.target.checked; paintSummaries(); };
+
+async function openAppPicker() {
+  goSettings("apps");
+  if (!installedApps) {
+    $("#app-pick").innerHTML = `<li class="hint">Loading…</li>`;
+    await new Promise((r) => setTimeout(r, 30)); // let it paint before the blocking native call
+    try { installedApps = await api("GET", "/native/apps"); } catch (e) { $("#app-pick").innerHTML = `<li class="hint">${esc(e.message)}</li>`; return; }
+  }
+  $("#app-search").value = "";
+  renderAppPicker();
+}
+
+function renderAppPicker() {
+  const q = $("#app-search").value.trim().toLowerCase();
+  const chosen = new Set(editBlock.apps.map((a) => a.id));
+  const list = installedApps.filter((a) => !q || a.label.toLowerCase().includes(q) || a.id.includes(q));
+  $("#app-pick").innerHTML = list.map((a) => `
+    <li><label><input type="checkbox" data-id="${esc(a.id)}" ${chosen.has(a.id) ? "checked" : ""}>
+      <span>${esc(a.label)}${a.game ? ' <em class="game">game</em>' : ""}<small>${esc(a.id)}</small></span></label></li>`).join("");
+  $$("#app-pick input").forEach((cb) => cb.onchange = () => {
+    const app = installedApps.find((a) => a.id === cb.dataset.id);
+    editBlock.apps = editBlock.apps.filter((a) => a.id !== app.id);
+    if (cb.checked) editBlock.apps.push({ id: app.id, label: app.label });
+    renderBlock();
+  });
+}
+$("#app-search").addEventListener("input", renderAppPicker);
+$("#block-apps-pick").onclick = openAppPicker;
+
+/* ---- pages */
+
+function goSettings(page) {
+  settingsPage = page;
+  $$(".set-page", settingsDialog).forEach((p) => { p.hidden = p.dataset.page !== page; });
+  const cur = $(`.set-page[data-page="${page}"]`, settingsDialog);
+  $("#settings-title").textContent = cur.dataset.title || "Settings";
+  $("#settings-back").hidden = page === "home";
+  settingsDialog.scrollTop = 0;
+  if (page === "home") paintSummaries();
+}
+
+function settingsBack() {
+  if (settingsPage === "apps") goSettings("blocking");
+  else if (settingsPage !== "home") goSettings("home");
+  else return false;
+  return true;
+}
+
+$$(".set-link").forEach((b) => b.onclick = () => goSettings(b.dataset.go));
+$("#settings-back").onclick = settingsBack;
+
+function readSettingsForm() {
+  return {
+    goals: {
+      daily: parseInt($("#goal-daily").value || "0", 10) || 0,
+      weekly: Math.round((parseFloat($("#goal-weekly").value || "0") || 0) * 60),
+    },
+    schedules: readSchedules(),
+    block: editBlock,
+    launch_window: readWindow(),
+  };
+}
+
+function paintSummaries() {
+  if (!settingsDoc) return;
+  const f = readSettingsForm();
+  const g = [f.goals.daily && `${f.goals.daily} min a day`, f.goals.weekly && `${+(f.goals.weekly / 60).toFixed(1)} h a week`].filter(Boolean);
+  $("#sum-goals").textContent = g.join(" · ") || "None";
+  const on = f.schedules.filter((s) => s.enabled).length;
+  $("#sum-launches").textContent = f.schedules.length ? `${plural(f.schedules.length, "launch")}${on < f.schedules.length ? `, ${on} on` : ""}` : "None";
+  const lw = f.launch_window;
+  $("#sum-window").textContent = lw.enabled
+    ? `${fmtDays(lw.days)} ${fmtHm(lw.start)}–${fmtHm(lw.end)}, ${lw.after} min after ${lw.trigger === "home" ? "you get home" : "it opens"}`
+    : "Off";
+  const b = f.block;
+  $("#sum-blocking").textContent = [
+    b.sites.length && plural(b.sites.length, "site"),
+    (b.apps.length || b.games) && (b.games ? `${b.apps.length ? plural(b.apps.length, "app") + " + " : ""}games` : plural(b.apps.length, "app")),
+    b.programs.length && plural(b.programs.length, "program"),
+  ].filter(Boolean).join(" · ") || "Nothing";
+  if (appInfo) {
+    $("#sum-phone").textContent = appInfo.blocker.enabled ? "Blocker on" : "Blocker off";
+    $("#sum-phone").classList.toggle("warn", !appInfo.blocker.enabled);
+    $("#sum-sync").textContent = appInfo.server_url ? appInfo.server_url.replace(/^https?:\/\//, "") : "Off";
+  }
+}
+settingsDialog.addEventListener("input", (e) => { if (!e.target.closest("#app-search")) paintSummaries(); });
 
 async function openSettings() {
   $("#settings-msg").textContent = "";
   try {
     const s = await api("GET", "/api/settings");
+    settingsDoc = s;
+    state.settings = s;
     $("#goal-daily").value = s.goals.daily || "";
     $("#goal-weekly").value = s.goals.weekly ? +(s.goals.weekly / 60).toFixed(1) : "";
     $("#schedules").replaceChildren(...s.schedules.map(scheduleEl));
+    editBlock = JSON.parse(JSON.stringify(s.block));
+    fillWindow(s.launch_window);
+    $("#lw-body").classList.toggle("off", !s.launch_window.enabled);
+    renderBlock();
   } catch (e) { $("#settings-msg").textContent = e.message; }
   if (NATIVE) await loadAppInfo();
+  goSettings("home");
   settingsDialog.showModal();
 }
 
 async function loadAppInfo() {
-  $("#app-settings").hidden = false;
   try {
     appInfo = await api("GET", "/native/app");
     $("#server-url").value = appInfo.server_url || "";
@@ -703,6 +950,18 @@ async function loadAppInfo() {
     $("#dnd-hint").textContent = appInfo.dnd.enabled && !appInfo.dnd.granted ? "Needs Do Not Disturb access. Tap the toggle again to grant it." : "";
     $("#notif-btn").textContent = appInfo.notifications.granted ? "Allowed" : "Allow";
     $("#notif-btn").disabled = !!appInfo.notifications.granted;
+    const bl = appInfo.blocker;
+    $("#blocker-btn").textContent = bl.enabled ? "On" : "Turn on";
+    $("#blocker-btn").disabled = !!bl.enabled;
+    $("#blocker-state").textContent = bl.enabled
+      ? "watching for blocked apps and sites during burns"
+      : "needs accessibility access to see which app or site is open";
+    $("#blocker-hint").hidden = !!bl.enabled;
+    $("#blocker-hint").textContent = "The blocker is off on this phone, so apps and sites won't be blocked here. Turn it on in Settings › Phone.";
+    $("#ring-toggle").checked = !!appInfo.ring.enabled;
+    $("#ring-hint").textContent = appInfo.ring.enabled && !appInfo.ring.full_screen ? "Full-screen alerts are off for Ignition, so it can only ring, not light up the lock screen." : "";
+    paintHome();
+    paintSummaries();
   } catch (e) { $("#sync-status").textContent = e.message; }
 }
 
@@ -716,27 +975,36 @@ function paintSyncStatus() {
   $("#sync-status").textContent = text;
 }
 
+async function saveSettings(quiet) {
+  const body = readSettingsForm();
+  try {
+    settingsDoc = await api("PUT", "/api/settings", body);
+    state.settings = settingsDoc;
+    if (!quiet) toast("Saved.");
+    loadIgnite();
+    return true;
+  } catch (e) { $("#settings-msg").textContent = e.message; return false; }
+}
+
+const settingsChanged = () => settingsDoc && JSON.stringify(readSettingsForm()) !== JSON.stringify({
+  goals: settingsDoc.goals, schedules: settingsDoc.schedules, block: settingsDoc.block, launch_window: settingsDoc.launch_window,
+});
+
+// Closing never throws edits away: anything changed is saved on the way out.
+async function closeSettings() {
+  if (settingsChanged() && !(await saveSettings())) return;
+  settingsDialog.close();
+}
+
 $("#settings-btn").onclick = openSettings;
-$("#settings-close").onclick = () => settingsDialog.close();
-settingsDialog.addEventListener("click", (e) => { if (e.target === settingsDialog) settingsDialog.close(); });
+$("#settings-close").onclick = closeSettings;
+settingsDialog.addEventListener("click", (e) => { if (e.target === settingsDialog) closeSettings(); });
+settingsDialog.addEventListener("cancel", (e) => { e.preventDefault(); if (!settingsBack()) closeSettings(); });
 $("#add-schedule").onclick = () => {
   $("#schedules").append(scheduleEl({ id: randomId(), time: "09:00", minutes: 50, lead: 5, enabled: true, days: [1, 2, 3, 4, 5] }));
+  paintSummaries();
 };
-$("#settings-save").onclick = async () => {
-  const body = {
-    goals: {
-      daily: parseInt($("#goal-daily").value || "0", 10) || 0,
-      weekly: Math.round((parseFloat($("#goal-weekly").value || "0") || 0) * 60),
-    },
-    schedules: readSchedules(),
-  };
-  try {
-    await api("PUT", "/api/settings", body);
-    settingsDialog.close();
-    toast("Saved.");
-    loadIgnite();
-  } catch (e) { $("#settings-msg").textContent = e.message; }
-};
+$("#settings-save").onclick = async () => { if (await saveSettings()) settingsDialog.close(); };
 $("#server-test").onclick = async () => {
   $("#sync-status").textContent = "Checking…";
   await new Promise((r) => setTimeout(r, 50)); // let "Checking…" paint before the blocking native call
@@ -750,7 +1018,43 @@ $("#dnd-toggle").onchange = async (e) => {
   try { appInfo = await api("PUT", "/native/app", { dnd_enabled: e.target.checked }); } catch (err) { toast(err.message); }
   loadAppInfo();
 };
+$("#ring-toggle").onchange = async (e) => {
+  try { appInfo = await api("PUT", "/native/app", { ring_enabled: e.target.checked }); } catch (err) { toast(err.message); }
+  loadAppInfo();
+};
+$("#blocker-btn").onclick = async () => { try { appInfo = await api("POST", "/native/app/blocker"); } catch (e) { toast(e.message); } loadAppInfo(); };
 $("#notif-btn").onclick = async () => { try { await api("POST", "/native/app/notifications"); } catch (e) { toast(e.message); } };
+
+/* ---------------- main engine cutoff ---------------- */
+
+const mecoDialog = $("#meco-dialog");
+let secondStage = 25;
+
+function paintSecond() {
+  $$("#meco-chips [data-second]").forEach((b) => b.classList.toggle("on", Number(b.dataset.second) === secondStage));
+  $("#meco-min").value = $$("#meco-chips [data-second]").some((b) => Number(b.dataset.second) === secondStage) ? "" : secondStage;
+}
+
+function showCutoff(sess) {
+  const mins = sess.minutes;
+  $("#meco-title").textContent = `${plural(mins, "minute")} burned.`;
+  secondStage = sess.planned || mins;
+  paintSecond();
+  if (!mecoDialog.open) mecoDialog.showModal();
+}
+
+$$("#meco-chips [data-second]").forEach((b) => b.onclick = () => { secondStage = Number(b.dataset.second); paintSecond(); });
+$("#meco-min").addEventListener("change", () => { const n = parseInt($("#meco-min").value, 10); if (n >= 1 && n <= 720) { secondStage = n; paintSecond(); } });
+$("#meco-done").onclick = () => mecoDialog.close();
+mecoDialog.addEventListener("click", (e) => { if (e.target === mecoDialog) mecoDialog.close(); });
+$("#meco-go").onclick = async () => {
+  mecoDialog.close();
+  try {
+    setIgnite(await api("POST", "/api/ignite", { minutes: secondStage }), true);
+    toast("Second stage ignition.");
+    if (navigator.vibrate) navigator.vibrate(60);
+  } catch (e) { toast(e.message); }
+};
 
 /* ---------------- routing & lifecycle ---------------- */
 
@@ -765,17 +1069,18 @@ function route() {
 }
 
 // Hooks for the Android app.
-window.ignitionRefresh = () => { loadItems(); loadIgnite(); if (settingsDialog.open && NATIVE) loadAppInfo(); };
+window.ignitionRefresh = () => { loadItems(); loadIgnite(); if (settingsDialog.open && NATIVE) loadAppInfo(); else loadSettings(); };
 window.ignitionBack = () => {
   if (!$("#sort-menu").hidden) { closeSortMenu(); return true; }
-  for (const d of [addDialog, settingsDialog]) if (d.open) { d.close(); return true; }
+  if (settingsDialog.open) { if (!settingsBack()) closeSettings(); return true; }
+  for (const d of [addDialog, mecoDialog]) if (d.open) { d.close(); return true; }
   if (state.page !== "need") { location.hash = "need"; return true; }
   return false;
 };
 
 window.addEventListener("hashchange", route);
 document.addEventListener("keydown", (e) => {
-  if (addDialog.open || settingsDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (addDialog.open || settingsDialog.open || mecoDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
   if (e.key === "n" || e.key === "+" || e.key === "a") { e.preventDefault(); openAdd(); }
   if (e.key === "1") location.hash = "need";
@@ -783,13 +1088,14 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "3") location.hash = "ignite";
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) { loadItems(); loadIgnite(); }
+  if (!document.hidden) { loadItems(); loadIgnite(); loadSettings(); }
 });
 
 paintSortButtons();
 route();
 loadItems();
 loadIgnite();
+loadSettings();
 setInterval(() => { if (!document.hidden) loadIgnite(); }, 5000);
 setInterval(() => { if (!document.hidden && !addDialog.open) loadItems(); }, 30000);
 setInterval(() => {

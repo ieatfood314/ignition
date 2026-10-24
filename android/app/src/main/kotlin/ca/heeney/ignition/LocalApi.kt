@@ -36,7 +36,7 @@ class LocalApi(private val context: Context) {
                     Logic.skip(store, body.optString("schedule_id"), body.optString("date"))
                     Logic.igniteState(store)
                 }
-                r == listOf("settings") && method == "GET" -> { mutated = false; store.settings }
+                r == listOf("settings") && method == "GET" -> { mutated = false; Logic.cleanSettings(store.settings) }
                 r == listOf("settings") && method == "PUT" -> Logic.cleanSettings(body).also { store.putSettings(it) }
                 r == listOf("stats") -> { mutated = false; Logic.stats(store) }
                 else -> throw ApiError(404, "not found")

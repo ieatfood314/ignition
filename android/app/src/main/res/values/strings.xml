@@ -6,4 +6,5 @@
     <string name="widget_ignite_desc">Countdown while burning; tap to open the timer</string>
     <string name="widget_next_desc">The top of your need-to-do list</string>
     <string name="widget_burn_desc">Today and this week against your burn goals</string>
+    <string name="blocker_description">While a burn is active, Ignition sends you back to the home screen when you open a blocked app or a blocked site. It only reads the foreground app and, in browsers, the address bar. Nothing is logged or sent anywhere.</string>
 </resources>

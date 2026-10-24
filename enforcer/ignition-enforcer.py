@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Ignition enforcer: runs as root on each machine and applies blocks while a session is active.
 
-Every few seconds it heartbeats to the ignition server, which replies with the current session.
-While a session is active it:
+Every few seconds it heartbeats to the ignition server, which replies with the current session and the
+shared block list. While a session is active it:
   * cuts off T3 Code clients: an nftables table rejects loopback TCP to the T3 ports from every
     process outside the T3 server's own cgroups (so running threads keep going, but Tailscale Serve,
     SSH tunnels and local desktop apps can't reach it), and existing client connections are killed;
-  * kills blocked programs (e.g. lutris) that are started after the session began.
-The last known session is cached on disk, so blocks hold until it ends even if the server is unreachable.
+  * cuts off other local services completely (block_ports), e.g. a self-hosted video server;
+  * points blocked sites at 0.0.0.0 in /etc/hosts;
+  * kills blocked programs (e.g. topgrade, lutris), and anything they spawned, if started after the
+    session began;
+  * runs the optional burn/idle hooks (e.g. to recolour RGB lighting).
+The last known session and block list are cached on disk, so blocks hold until the session ends even if
+the server is unreachable.
 """
 
 import json
@@ -24,6 +29,43 @@ from pathlib import Path
 NFT_TABLE = "ignition"
 CACHE = Path("/var/lib/ignition/state.json")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
+HOSTS = Path("/etc/hosts")
+HOSTS_BEGIN = "# >>> ignition: blocked while burning >>>"
+HOSTS_END = "# <<< ignition <<<"
+ACCENT = "e23a29"
+
+# Other domains that belong to a site; subdomains are covered separately.
+ALIASES = {
+    "youtube.com": ["youtu.be", "youtube-nocookie.com"],
+    "reddit.com": ["redd.it", "i.redd.it", "v.redd.it", "preview.redd.it", "external-preview.redd.it"],
+    "facebook.com": ["fb.com", "fb.me", "fb.watch", "messenger.com"],
+}
+# /etc/hosts has no wildcards, so a site also blocks these common subdomains.
+SUBDOMAINS = {
+    "": ["www", "m"],
+    "youtube.com": ["music", "tv", "studio", "accounts"],
+    "reddit.com": ["old", "new", "np", "sh", "gql", "oauth", "gateway", "chat"],
+    "facebook.com": ["web", "mbasic", "touch", "business", "l", "lm", "edge-chat", "upload"],
+    "onshape.com": ["cad", "learn", "forum"],
+    "printables.com": ["media", "api"],
+    "makerworld.com": ["public-cdn", "api"],
+    "monkeytype.com": ["api"],
+}
+
+
+def hosts_for(sites):
+    """Host names for /etc/hosts. Port-qualified sites are skipped: hosts has no ports, so blocking the
+    bare host would take out everything else on it (block_ports handles those instead)."""
+    out = []
+    for site in sites:
+        if ":" in site:
+            continue
+        for base in [site, *ALIASES.get(site, [])]:
+            for sub in ["", *SUBDOMAINS[""], *SUBDOMAINS.get(base, [])]:
+                name = f"{sub}.{base}" if sub else base
+                if name not in out:
+                    out.append(name)
+    return out
 
 
 def log(*a):
@@ -41,9 +83,12 @@ class Enforcer:
         self.url = cfg["server_url"].rstrip("/")
         self.poll = cfg.get("poll_seconds", 5)
         self.t3 = cfg.get("t3") or {}
-        self.block = cfg.get("block_processes") or []
+        self.local_block = [r["name"] for r in cfg.get("block_processes") or []]
+        self.block_ports = [int(p) for p in cfg.get("block_ports") or []]
+        self.hooks = cfg.get("hooks") or {}
         self.notify_user = cfg.get("notify_user")
         self.session = self.load_cache()
+        self.remote = self.session.pop("block", None) or {"sites": [], "programs": []}
         self.armed = False
         self.error = None
         self.killed = 0
@@ -58,11 +103,15 @@ class Enforcer:
         except (OSError, ValueError):
             return {"active": False}
 
-    def save_cache(self, s):
+    def save_cache(self):
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         tmp = CACHE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(s))
+        tmp.write_text(json.dumps({**self.session, "block": self.remote}))
         tmp.replace(CACHE)
+
+    @property
+    def block(self):
+        return sorted(set(self.local_block) | set(self.remote.get("programs") or []))
 
     def active(self):
         s = self.session
@@ -83,9 +132,10 @@ class Enforcer:
         except Exception as e:  # noqa: BLE001 — offline: keep enforcing the cached session
             return f"server unreachable: {e}"
         new = {k: s.get(k) for k in ("active", "session_id", "started_at", "ends_at")}
-        if new != self.session:
-            self.session = new
-            self.save_cache(new)
+        remote = s.get("block") or self.remote
+        if new != self.session or remote != self.remote:
+            self.session, self.remote = new, remote
+            self.save_cache()
         return None
 
     # ---------- T3 lockout ----------
@@ -94,13 +144,29 @@ class Enforcer:
         return [p for p in self.t3.get("allow_cgroups", []) if (CGROUP_ROOT / p).is_dir()]
 
     def apply_nft(self):
-        ports = ", ".join(str(p) for p in self.t3["ports"])
-        rules = [
-            f'oifname "lo" tcp dport {{ {ports} }} socket cgroupv2 level {p.count("/") + 1} "{p}" accept'
-            for p in self.allowed_cgroups()
-        ]
-        rules.append(f'oifname "lo" tcp dport {{ {ports} }} reject with tcp reset')
+        rules = []
+        if self.block_ports:
+            # Nobody gets these, local or remote. Loopback covers Tailscale Serve and local clients; the
+            # prerouting rule runs before Docker's DNAT, so published container ports are covered too.
+            closed = ", ".join(str(p) for p in self.block_ports)
+            rules.append(f'oifname "lo" tcp dport {{ {closed} }} reject with tcp reset')
+        if self.t3.get("ports"):
+            ports = ", ".join(str(p) for p in self.t3["ports"])
+            rules += [
+                f'oifname "lo" tcp dport {{ {ports} }} socket cgroupv2 level {p.count("/") + 1} "{p}" accept'
+                for p in self.allowed_cgroups()
+            ]
+            rules.append(f'oifname "lo" tcp dport {{ {ports} }} reject with tcp reset')
         body = "\n".join(f"    {r}" for r in rules)
+        pre = ""
+        if self.block_ports:
+            closed = ", ".join(str(p) for p in self.block_ports)
+            pre = (
+                f"  chain prerouting {{\n"
+                f"    type filter hook prerouting priority dstnat - 10; policy accept;\n"
+                f'    iifname != "lo" fib daddr type local tcp dport {{ {closed} }} drop\n'
+                f"  }}\n"
+            )
         script = (
             f"table inet {NFT_TABLE} {{}}\n"
             f"delete table inet {NFT_TABLE}\n"
@@ -109,6 +175,7 @@ class Enforcer:
             f"    type filter hook output priority filter - 10; policy accept;\n"
             f"{body}\n"
             f"  }}\n"
+            f"{pre}"
             f"}}\n"
         )
         r = run(["nft", "-f", "-"], stdin=script)
@@ -126,7 +193,9 @@ class Enforcer:
         return any(cg == p or cg.startswith(p + "/") for p in self.allowed_cgroups())
 
     def kill_clients(self):
-        ports = self.t3["ports"]
+        ports = self.t3.get("ports") or []
+        if not ports:
+            return
         flt = " or ".join(f"dport = :{p}" for p in ports)
         r = run(["ss", "-Htnp", "state", "established", f"( {flt} )"])
         for line in r.stdout.splitlines():
@@ -143,6 +212,63 @@ class Enforcer:
                 self.killed += 1
                 log(f"killed T3 client connection {local} -> {peer} pids={pids}")
 
+    def kill_port_connections(self):
+        if not self.block_ports:
+            return
+        flt = " or ".join(f"sport = :{p} or dport = :{p}" for p in self.block_ports)
+        r = run(["ss", "-K", "-Htn", "state", "established", f"( {flt} )"])
+        n = len(r.stdout.splitlines())
+        if n:
+            self.killed += n
+            log(f"killed {n} connection(s) to blocked ports {self.block_ports}")
+
+    # ---------- blocked sites ----------
+
+    def apply_hosts(self, sites):
+        """Rewrite our section of /etc/hosts (only if it changed). An empty list removes the section."""
+        try:
+            text = HOSTS.read_text()
+        except OSError:
+            return
+        kept, inside = [], False
+        for line in text.splitlines():
+            if line.strip() == HOSTS_BEGIN:
+                inside = True
+            elif line.strip() == HOSTS_END:
+                inside = False
+            elif not inside:
+                kept.append(line)
+        while kept and not kept[-1].strip():
+            kept.pop()
+        names = hosts_for(sites)
+        if names:
+            kept += ["", HOSTS_BEGIN, *(f"{ip} {n}" for n in names for ip in ("0.0.0.0", "::")), HOSTS_END]
+        new = "\n".join(kept) + "\n"
+        if new == text:
+            return
+        tmp = HOSTS.with_name(".hosts.ignition")
+        tmp.write_text(new)
+        os.chmod(tmp, 0o644)
+        tmp.replace(HOSTS)
+        log(f"/etc/hosts: {'blocking ' + str(len(names)) + ' names' if names else 'cleared'}")
+
+    # ---------- hooks ----------
+
+    def run_hook(self, name):
+        cmd = self.hooks.get(name)
+        if not cmd:
+            return
+        env = {**os.environ, "IGNITION_COLOR": self.hooks.get("color") or ACCENT, "IGNITION_PHASE": name}
+
+        def go():
+            try:
+                r = subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True, timeout=60)
+                if r.returncode:
+                    log(f"{name} hook exited {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}")
+            except Exception as e:  # noqa: BLE001
+                log(f"{name} hook failed: {e}")
+        threading.Thread(target=go, daemon=True).start()
+
     # ---------- process blocking ----------
 
     def boot_time(self):
@@ -151,39 +277,51 @@ class Enforcer:
                 return int(line.split()[1])
         return 0
 
-    def blocked_name(self, argv):
+    @staticmethod
+    def blocked_name(argv, names):
         heads = [os.path.basename(a) for a in argv[:2]]
-        for rule in self.block:
-            if rule["name"] in heads:
-                return rule["name"]
+        for name in names:
+            if name in heads:
+                return name
         return None
 
     def kill_blocked_processes(self):
         started = self.session.get("started_at") or 0
         btime, hz = self.boot_time(), os.sysconf("SC_CLK_TCK")
-        hits = []
+        names = self.block
+        hits, children = [], {}
+        targets = []
         for d in Path("/proc").iterdir():
             if not d.name.isdigit():
                 continue
             try:
+                stat = (d / "stat").read_text()
+                fields = stat.rsplit(")", 1)[1].split()
+                children.setdefault(int(fields[1]), []).append(int(d.name))
                 argv = (d / "cmdline").read_bytes().split(b"\0")
                 argv = [a.decode(errors="replace") for a in argv if a]
-                name = self.blocked_name(argv)
+                name = self.blocked_name(argv, names)
                 if not name:
                     continue
-                stat = (d / "stat").read_text()
-                start = btime + int(stat.rsplit(")", 1)[1].split()[19]) / hz
+                start = btime + int(fields[19]) / hz
                 uid = (d / "status").read_text().split("\nUid:")[1].split()[0]
             except (OSError, IndexError, ValueError):
                 continue
-            if start < started:
-                continue
-            try:
-                os.kill(int(d.name), signal.SIGKILL)
-                hits.append(name)
-                log(f"killed {name} pid={d.name} uid={uid}")
-            except OSError:
-                pass
+            if start >= started:
+                targets.append((int(d.name), name, uid))
+        for pid, name, uid in targets:
+            # Take what it spawned down with it (topgrade -> sudo pacman, ...): those all started later.
+            tree, i = [pid], 0
+            while i < len(tree):
+                tree += children.get(tree[i], [])
+                i += 1
+            for p in tree:
+                try:
+                    os.kill(p, signal.SIGKILL)
+                except OSError:
+                    pass
+            hits.append(name)
+            log(f"killed {name} pid={pid} uid={uid}" + (f" and {len(tree) - 1} child(ren)" if len(tree) > 1 else ""))
         if hits:
             self.notify(f"{hits[0].capitalize()} is blocked", self.remaining_text())
 
@@ -212,14 +350,19 @@ class Enforcer:
         if not self.active():
             if self.armed:
                 log("session over: lifting blocks")
+                self.run_hook("idle")
             self.clear_nft()
+            self.apply_hosts([])
             self.armed = False
             return
         if not self.armed:
             log(f"session active until {time.ctime(self.session['ends_at'])}: arming")
-        if self.t3.get("ports"):
+            self.run_hook("burn")
+        self.apply_hosts(self.remote.get("sites") or [])
+        if self.t3.get("ports") or self.block_ports:
             self.apply_nft()
             self.kill_clients()
+            self.kill_port_connections()
         self.armed = True
 
     def main_loop(self):
@@ -252,6 +395,10 @@ class Enforcer:
         t.start()
         self.main_loop()
         self.clear_nft()
+        self.apply_hosts([])
+        if self.armed:
+            self.run_hook("idle")
+            time.sleep(2)
         log("stopped; blocks lifted")
 
 

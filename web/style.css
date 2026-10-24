@@ -184,8 +184,19 @@ dialog.sheet[open] { animation: pop .18s ease-out; }
 }
 .ignite-btn:hover { box-shadow: 0 0 70px rgba(226,58,41,.32), inset 0 0 50px rgba(226,58,41,.12); }
 .ignite-btn:active { transform: scale(.97); }
-.ignite-label { font-size: clamp(30px, 9vw, 44px); font-weight: 800; letter-spacing: .18em; padding-left: .18em; font-variant-numeric: tabular-nums; }
-.ignite-sub { font-size: 13px; color: var(--muted); letter-spacing: .04em; min-height: 1em; }
+/* The label sits dead centre; the sub-line hangs below it without pushing it up. */
+.ignite-face { position: relative; display: block; }
+.ignite-label {
+  display: block; line-height: 1; font-size: clamp(30px, 9vw, 44px); font-weight: 800;
+  letter-spacing: .18em; padding-left: .18em; font-variant-numeric: tabular-nums;
+  /* Caps have no descenders, so trim the line box to the cap height or they sit high. */
+  text-box: trim-both cap alphabetic;
+}
+@supports not (text-box: trim-both cap alphabetic) { .ignite-label { padding-top: .1em; } }
+.ignite-sub {
+  position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 12px;
+  font-size: 13px; color: var(--muted); letter-spacing: .04em; white-space: nowrap;
+}
 
 .dial.arming .ignite-btn { background: var(--accent); color: #000; animation: pulse 1s ease-in-out infinite; }
 .dial.arming .ignite-sub { color: rgba(0,0,0,.7); }
@@ -337,6 +348,8 @@ dialog.sheet[open] { animation: pop .18s ease-out; }
 .goal.met .goal-bar i { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
 .goal.met .goal-val { color: var(--accent); }
 .next-sched { margin: 14px 0 0; font-size: 13.5px; color: var(--muted); }
+.window-note { margin: 26px 0 0; font-size: 14px; color: var(--muted); text-align: center; }
+.window-note span { color: var(--faint); }
 
 /* ---------- v2: settings ---------- */
 dialog.sheet.tall { max-height: 88dvh; overflow-y: auto; }
@@ -397,4 +410,67 @@ dialog.sheet.tall { max-height: 88dvh; overflow-y: auto; }
 dialog.sheet.tall .sheet-actions { position: sticky; bottom: -22px; margin: 20px -22px -22px; padding: 14px 22px; background: var(--surface); border-top: 1px solid var(--line); }
 @media (max-width: 720px) {
   dialog.sheet.tall .sheet-actions { bottom: calc(-18px - var(--safe-b)); margin: 20px -18px calc(-18px - var(--safe-b)); padding: 12px 18px calc(12px + var(--safe-b)); }
+}
+
+/* ---------- v3: settings pages ---------- */
+.in-web .app-only, .in-app .web-only { display: none !important; }
+.settings-head { gap: 6px; }
+.settings-head h2 { flex: 1; }
+#settings-back { margin-left: -8px; }
+.set-home { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 14px; }
+.set-link {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: none; border: 0; border-bottom: 1px solid var(--line); padding: 15px 2px; font-size: 16px;
+}
+.set-link:last-child { border-bottom: 0; }
+.set-link::after { content: "›"; color: var(--faint); font-size: 20px; line-height: 1; }
+.set-link > span:first-child { flex: none; }
+.set-sum { flex: 1; min-width: 0; text-align: right; color: var(--faint); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-sum.warn { color: var(--accent); }
+.set-page:not(.set-home) { margin-top: 16px; }
+.set-page h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--faint); font-weight: 650; margin: 24px 0 8px; }
+.set-page h3:first-child { margin-top: 4px; }
+.hint.inline { display: block; margin: 2px 0 0; font-size: 12.5px; }
+.toggle-row > span { min-width: 0; }
+
+.tag-list { list-style: none; padding: 0; margin: 0 0 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-list:empty { display: none; }
+.tag-list li {
+  display: inline-flex; align-items: center; gap: 2px; padding: 4px 4px 4px 12px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line); font-size: 14px;
+}
+.tag-x { width: 24px; height: 24px; border: 0; border-radius: 50%; background: none; color: var(--faint); padding: 0; display: grid; place-items: center; }
+.tag-x svg { width: 14px; height: 14px; }
+.tag-x:hover { color: var(--accent); }
+.tag-add { display: flex; gap: 8px; margin-bottom: 4px; }
+.tag-add input, .app-search {
+  flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font-size: 15px;
+}
+.tag-add input:focus, .app-search:focus { outline: none; border-color: var(--accent); }
+.app-search { width: 100%; margin-bottom: 8px; }
+.app-pick { list-style: none; padding: 0; margin: 0; }
+.app-pick li { border-bottom: 1px solid var(--line); }
+.app-pick label { display: flex; align-items: center; gap: 14px; padding: 11px 2px; cursor: pointer; }
+.app-pick input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.app-pick span { display: grid; font-size: 15px; }
+.app-pick small { color: var(--faint); font-size: 12px; overflow-wrap: anywhere; }
+.app-pick .game { font-style: normal; font-size: 11px; color: var(--accent); margin-left: 6px; text-transform: uppercase; letter-spacing: .08em; }
+
+.lw-body { display: grid; gap: 12px; margin-top: 8px; transition: opacity .15s; }
+.lw-body.off { opacity: .4; }
+.lw-body .set-row { margin: 0; flex-wrap: wrap; }
+.lw-body .set-row label { width: 64px; }
+.lw-body input[type="number"] { width: 70px; }
+.lw-trigger { margin-left: 74px; }
+.lw-home { margin-left: 74px; }
+.lw-home .hint { margin-bottom: 8px; }
+.lw-start-hint { margin: 8px 0 -4px; }
+#lw-days { margin-bottom: 2px; }
+
+/* ---------- v3: main engine cutoff ---------- */
+dialog.meco h2 { margin: 2px 0 6px; font-size: 26px; letter-spacing: -.01em; }
+.meco-kicker { margin: 0; color: var(--accent); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .16em; }
+.meco-chips { margin-top: 16px; }
+@media (max-width: 720px) {
+  .lw-trigger, .lw-home { margin-left: 0; }
 }

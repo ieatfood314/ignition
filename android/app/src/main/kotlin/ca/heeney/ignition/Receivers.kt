@@ -13,15 +13,18 @@ class EventReceiver : BroadcastReceiver() {
         val error = when (intent.action) {
             Reactor.ACTION_TICK -> { Widgets.updateAll(app); null }
             Reactor.ACTION_WARN -> { Reactor.warn(app); null }
+            Reactor.ACTION_WINDOW -> { LaunchWindow.tick(app); Reactor.update(app); null }
             Notifier.ACTION_NOW -> api.command("now")
             Notifier.ACTION_SCRUB -> api.command("scrub")
             Notifier.ACTION_EXTEND -> api.command("extend", minutes = intent.getIntExtra("minutes", 15))
+            Notifier.ACTION_LW_START -> api.command("ignite", minutes = intent.getIntExtra("minutes", 50), delay = intent.getIntExtra("delay", 0))
+                .also { if (it == null) Notifier.cancelLaunchWindow(app) }
             Notifier.ACTION_SKIP -> api.command("skip", scheduleId = intent.getStringExtra("schedule_id") ?: "", date = intent.getStringExtra("date") ?: "")
                 .also { if (it == null) Notifier.cancelWarning(app) }
             else -> { Reactor.update(app); null } // EDGE, FIRE
         }
         if (error != null) Toast.makeText(app, error, Toast.LENGTH_SHORT).show()
-        if (intent.action != Reactor.ACTION_TICK) {
+        if (intent.action != Reactor.ACTION_TICK && intent.action != Reactor.ACTION_WINDOW) {
             UiBus.changed()
             Sync.kick(app)
         }

@@ -13,6 +13,7 @@ import argparse
 import json
 import mimetypes
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -31,7 +32,16 @@ SCHEDULE_WINDOW = 120  # seconds after a scheduled time during which it may stil
 
 ITEM_FIELDS = ("list", "title", "estimate_min", "due", "priority", "notes", "created_at", "done_at")
 SESSION_FIELDS = ("minutes", "planned", "created_at", "starts_at", "ends_at", "stopped_at", "source")
-DEFAULT_SETTINGS = {"goals": {"daily": 0, "weekly": 0}, "schedules": []}
+DEFAULT_LAUNCH_WINDOW = {
+    "enabled": False, "days": [1, 2, 3, 4, 5], "start": "15:00", "end": "17:30",
+    "trigger": "home", "after": 20, "minutes": 50, "tminus": 10,
+}
+DEFAULT_SETTINGS = {
+    "goals": {"daily": 0, "weekly": 0},
+    "schedules": [],
+    "block": {"sites": [], "apps": [], "games": False, "programs": []},
+    "launch_window": DEFAULT_LAUNCH_WINDOW,
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -186,23 +196,90 @@ def clean_session(body):
     return out
 
 
+def clean_time(val, default):
+    try:
+        hh, mm = (str(val or default) + ":00").split(":")[:2]
+        return f"{min(23, max(0, int(hh))):02d}:{min(59, max(0, int(mm))):02d}"
+    except ValueError:
+        return default
+
+
+def clean_days(val):
+    days = sorted({int(d) for d in (val or []) if str(d).isdigit() and 1 <= int(d) <= 7})
+    return days or [1, 2, 3, 4, 5, 6, 7]
+
+
+def clamp_int(val, lo, hi, default):
+    try:
+        return max(lo, min(hi, int(val)))
+    except (TypeError, ValueError):
+        return default
+
+
+SITE_RE = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$")
+PROGRAM_RE = re.compile(r"^[A-Za-z0-9._+-]{1,64}$")
+PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
+
+
+def clean_site(val):
+    """'https://www.YouTube.com/watch?v=x' -> 'youtube.com'. Subdomains are always included when matching."""
+    s = str(val or "").strip().lower()
+    s = re.sub(r"^[a-z]+://", "", s).split("/")[0].split("?")[0].split("#")[0]
+    s = s.split("@")[-1].strip(".")
+    if s.startswith("www."):
+        s = s[4:]
+    return s if SITE_RE.match(s) else None
+
+
+def clean_block(body):
+    sites, programs, apps, seen = [], [], [], set()
+    for v in (body.get("sites") or [])[:300]:
+        site = clean_site(v)
+        if site and site not in sites:
+            sites.append(site)
+    for v in (body.get("programs") or [])[:100]:
+        name = str(v or "").strip()
+        if PROGRAM_RE.match(name) and name not in programs:
+            programs.append(name)
+    for v in (body.get("apps") or [])[:300]:
+        app = v if isinstance(v, dict) else {"id": v}
+        pkg = str(app.get("id") or "").strip()
+        if PACKAGE_RE.match(pkg) and pkg not in seen:
+            seen.add(pkg)
+            apps.append({"id": pkg[:200], "label": str(app.get("label") or pkg).strip()[:80]})
+    return {"sites": sites, "apps": apps, "games": bool(body.get("games")), "programs": programs}
+
+
+def clean_launch_window(body):
+    d = DEFAULT_LAUNCH_WINDOW
+    return {
+        "enabled": bool(body.get("enabled", d["enabled"])),
+        "days": clean_days(body.get("days") or d["days"]),
+        "start": clean_time(body.get("start"), d["start"]),
+        "end": clean_time(body.get("end"), d["end"]),
+        "trigger": body.get("trigger") if body.get("trigger") in ("home", "time") else d["trigger"],
+        "after": clamp_int(body.get("after"), 0, 240, d["after"]),
+        "minutes": clamp_int(body.get("minutes"), 1, MAX_MINUTES, d["minutes"]),
+        "tminus": clamp_int(body.get("tminus"), 0, 120, d["tminus"]),
+    }
+
+
 def clean_settings(body):
-    s = json.loads(json.dumps(DEFAULT_SETTINGS))
     goals = body.get("goals") or {}
-    s["goals"] = {k: max(0, min(24 * 60 * 7, int(goals.get(k) or 0))) for k in ("daily", "weekly")}
+    s = {"goals": {k: clamp_int(goals.get(k) or 0, 0, 24 * 60 * 7, 0) for k in ("daily", "weekly")}}
     scheds = []
     for sc in (body.get("schedules") or [])[:20]:
-        hh, mm = (str(sc.get("time") or "09:00") + ":00").split(":")[:2]
-        days = sorted({int(d) for d in (sc.get("days") or []) if 1 <= int(d) <= 7})
         scheds.append({
             "id": str(sc.get("id") or new_uid())[:32],
-            "time": f"{min(23, max(0, int(hh))):02d}:{min(59, max(0, int(mm))):02d}",
-            "days": days or [1, 2, 3, 4, 5, 6, 7],
-            "minutes": max(1, min(MAX_MINUTES, int(sc.get("minutes") or 50))),
-            "lead": max(0, min(60, int(sc.get("lead") if sc.get("lead") is not None else 5))),
+            "time": clean_time(sc.get("time"), "09:00"),
+            "days": clean_days(sc.get("days")),
+            "minutes": clamp_int(sc.get("minutes") or 50, 1, MAX_MINUTES, 50),
+            "lead": clamp_int(sc.get("lead") if sc.get("lead") is not None else 5, 0, 60, 5),
             "enabled": bool(sc.get("enabled", True)),
         })
     s["schedules"] = scheds
+    s["block"] = clean_block(body.get("block") or {})
+    s["launch_window"] = clean_launch_window(body.get("launch_window") or {})
     return s
 
 
@@ -299,8 +376,8 @@ class App:
     def settings(self):
         row = self.s.q("SELECT * FROM kv WHERE key='settings'")
         if not row:
-            return json.loads(json.dumps(DEFAULT_SETTINGS)), 0
-        return json.loads(row[0]["value"]), row[0]["updated_at"]
+            return clean_settings({}), 0
+        return clean_settings(json.loads(row[0]["value"])), row[0]["updated_at"]
 
     def put_settings(self, body, updated_at=None):
         value = clean_settings(body)
@@ -519,7 +596,8 @@ class App:
             "ON CONFLICT(host) DO UPDATE SET last_seen=excluded.last_seen, status=excluded.status",
             (host, now(), status),
         )
-        return self.ignite_state()
+        block = self.settings()[0]["block"]
+        return {**self.ignite_state(), "block": {"sites": block["sites"], "programs": block["programs"]}}
 
     # ---- sync (Android app)
 

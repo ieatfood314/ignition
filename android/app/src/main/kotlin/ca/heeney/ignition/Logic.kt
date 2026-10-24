@@ -191,6 +191,67 @@ object Logic {
                     .put("enabled", sc.optBoolean("enabled", true)),
             )
         }
-        return out.put("schedules", scheds)
+        out.put("schedules", scheds)
+        out.put("block", cleanBlock(body.optJSONObject("block") ?: JSONObject()))
+        out.put("launch_window", cleanLaunchWindow(body.optJSONObject("launch_window") ?: JSONObject()))
+        return out
     }
+
+    private val SITE = Regex("^[a-z0-9-]+(\\.[a-z0-9-]+)+(:\\d{1,5})?$")
+    private val PROGRAM = Regex("^[A-Za-z0-9._+-]{1,64}$")
+    private val PACKAGE = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$")
+
+    private fun cleanTime(v: String?, default: String): String {
+        val parts = ((v ?: default) + ":00").split(":")
+        val hh = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: return default
+        val mm = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+        return "%02d:%02d".format(hh, mm)
+    }
+
+    private fun cleanDays(arr: JSONArray?): JSONArray {
+        val days = sortedSetOf<Int>()
+        arr?.let { (0 until it.length()).mapNotNull { i -> it.optInt(i) }.filter { d -> d in 1..7 }.forEach(days::add) }
+        if (days.isEmpty()) (1..7).forEach(days::add)
+        return JSONArray().also { days.forEach(it::put) }
+    }
+
+    fun cleanBlock(b: JSONObject): JSONObject {
+        val sites = JSONArray()
+        val seenSites = HashSet<String>()
+        b.optJSONArray("sites")?.let { a ->
+            for (i in 0 until minOf(a.length(), 300)) {
+                val s = Blocking.cleanSite(a.optString(i)) ?: continue
+                if (seenSites.add(s)) sites.put(s)
+            }
+        }
+        val programs = JSONArray()
+        b.optJSONArray("programs")?.let { a ->
+            for (i in 0 until minOf(a.length(), 100)) {
+                val n = a.optString(i).trim()
+                if (PROGRAM.matches(n)) programs.put(n)
+            }
+        }
+        val apps = JSONArray()
+        val seenApps = HashSet<String>()
+        b.optJSONArray("apps")?.let { a ->
+            for (i in 0 until minOf(a.length(), 300)) {
+                val o = a.optJSONObject(i) ?: JSONObject().put("id", a.optString(i))
+                val id = o.optString("id").trim()
+                if (PACKAGE.matches(id) && seenApps.add(id)) {
+                    apps.put(JSONObject().put("id", id.take(200)).put("label", o.optString("label", id).ifEmpty { id }.take(80)))
+                }
+            }
+        }
+        return JSONObject().put("sites", sites).put("apps", apps).put("games", b.optBoolean("games")).put("programs", programs)
+    }
+
+    fun cleanLaunchWindow(b: JSONObject): JSONObject = JSONObject()
+        .put("enabled", b.optBoolean("enabled"))
+        .put("days", cleanDays(b.optJSONArray("days") ?: JSONArray().apply { (1..5).forEach { put(it) } }))
+        .put("start", cleanTime(b.optString("start"), "15:00"))
+        .put("end", cleanTime(b.optString("end"), "17:30"))
+        .put("trigger", b.optString("trigger").takeIf { it == "home" || it == "time" } ?: "home")
+        .put("after", (if (b.has("after")) b.optInt("after") else 20).coerceIn(0, 240))
+        .put("minutes", (if (b.has("minutes")) b.optInt("minutes") else 50).coerceIn(1, MAX_MINUTES))
+        .put("tminus", (if (b.has("tminus")) b.optInt("tminus") else 10).coerceIn(0, 120))
 }

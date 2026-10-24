@@ -18,6 +18,7 @@ object Reactor {
     const val ACTION_FIRE = "ca.heeney.ignition.internal.FIRE"
     const val ACTION_WARN = "ca.heeney.ignition.internal.WARN"
     const val ACTION_TICK = "ca.heeney.ignition.internal.TICK"
+    const val ACTION_WINDOW = "ca.heeney.ignition.internal.WINDOW"
 
     // Broadcasts for Tasker & friends.
     const val BROADCAST_COUNTDOWN = "ca.heeney.ignition.COUNTDOWN"
@@ -50,6 +51,7 @@ object Reactor {
         alarms(app, cur, next, t)
         Widgets.updateAll(app)
         Sync.schedulePeriodic(app, syncing)
+        LaunchWindow.tick(app)
         if (created) UiBus.changed()
     }
 
@@ -66,8 +68,11 @@ object Reactor {
                 val natural = t >= p.getLong("last_ends_at", 0) - 5
                 broadcast(app, BROADCAST_MECO, minutes, p.getLong("last_starts_at", 0), p.getLong("last_ends_at", 0), "")
                 dnd(app, false)
-                if (natural && minutes > 0) Notifier.alert(app, "MECO", "Main engine cutoff. $minutes min burned.")
+                Notifier.cancelRing(app)
+                if (natural && minutes > 0) Notifier.alert(app, "Main engine cutoff", "$minutes min burned. Nicely done.")
             }
+            // Any new session clears a standing nudge.
+            if (s != null && cur.phase != "idle") Notifier.cancelLaunchWindow(app)
             if (s != null && cur.phase == "countdown") {
                 broadcast(app, BROADCAST_COUNTDOWN, s.optInt("minutes"), s.optLong("starts_at"), s.optLong("ends_at"), s.optString("source"))
             }
@@ -75,6 +80,7 @@ object Reactor {
                 broadcast(app, BROADCAST_LIFTOFF, s.optInt("minutes"), s.optLong("starts_at"), s.optLong("ends_at"), s.optString("source"))
                 if (lastPhase == "countdown" || s.optString("source") == "schedule") {
                     Notifier.alert(app, "Liftoff", "${s.optInt("minutes")} min burn. Locked until ${Notifier.clock(app, s.optLong("ends_at"))}.")
+                    if (p.getBoolean("ring_enabled", false)) Notifier.ring(app, s.optInt("minutes"))
                 }
                 dnd(app, true)
             }
@@ -153,6 +159,23 @@ object Reactor {
             am.setRepeating(AlarmManager.RTC, System.currentTimeMillis() + 60_000, 60_000, tick)
         } else {
             am.cancel(tick)
+        }
+
+        // Launch window: when it's open and nothing is running, poll every few minutes to catch "home long
+        // enough"; otherwise wake once when it next opens. tick() does the actual nudging.
+        val window = pending(app, ACTION_WINDOW, 5)
+        val store = Store.get(app)
+        val cfg = synchronized(store) { LaunchWindow.config(store) }
+        val next5 = t + 5 * 60
+        val desired = when {
+            !cfg.optBoolean("enabled") -> null
+            cur.phase == "idle" && LaunchWindow.isOpen(cfg, t) && !LaunchWindow.nudgedToday(app, t) -> next5
+            else -> LaunchWindow.opensAt(cfg, t)
+        }
+        if (desired != null) {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, desired * 1000, window)
+        } else {
+            am.cancel(window)
         }
     }
 

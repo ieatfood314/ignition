@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Recolour this machine's RAM while a burn is on, and put it back afterwards.
+
+Used as an ignition enforcer hook (hooks.burn / hooks.idle). The enforcer runs it as root with
+$IGNITION_COLOR set to ignition's accent (e.g. e23a29).
+
+  openrgb-ram burn   # save the current lighting once, then set every DRAM device to $IGNITION_COLOR
+  openrgb-ram idle   # load the saved profile back
+
+The first burn saves the pristine lighting to an OpenRGB profile; a marker file keeps a restart
+mid-burn from overwriting it with the already-reddened state. "idle" restores and clears the marker.
+Only DRAM devices are touched, so keyboards/fans/etc. keep whatever they were doing.
+"""
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+PROFILE = "ignition-restore"
+MARKER = "/run/ignition/rgb-saved"
+DEFAULT_COLOR = "e23a29"
+
+
+def openrgb():
+    exe = shutil.which("openrgb")
+    if not exe:
+        sys.exit("openrgb not installed")
+    return exe
+
+
+def run(*args):
+    return subprocess.run([openrgb(), *args], capture_output=True, text=True, timeout=45)
+
+
+def dram_indices():
+    out = run("--list-devices").stdout
+    indices = []
+    # "0: Corsair Vengeance\n    Type:           DRAM" — index line, then a Type line.
+    cur = None
+    for line in out.splitlines():
+        m = re.match(r"^(\d+):\s", line)
+        if m:
+            cur = int(m.group(1))
+        elif cur is not None and "Type:" in line and "DRAM" in line:
+            indices.append(cur)
+            cur = None
+    return indices
+
+
+def burn():
+    color = re.sub(r"[^0-9a-fA-F]", "", os.environ.get("IGNITION_COLOR") or DEFAULT_COLOR)[:6] or DEFAULT_COLOR
+    if not os.path.exists(MARKER):
+        os.makedirs(os.path.dirname(MARKER), exist_ok=True)
+        run("--save-profile", PROFILE)
+        open(MARKER, "w").close()
+    targets = dram_indices()
+    if not targets:
+        sys.exit("no DRAM devices found")
+    for i in targets:
+        r = run("--device", str(i), "--mode", "static", "--color", color)
+        if r.returncode:
+            sys.exit(f"openrgb device {i}: {(r.stderr or r.stdout).strip()}")
+
+
+def idle():
+    if os.path.exists(MARKER):
+        run("--profile", PROFILE)
+        os.remove(MARKER)
+
+
+if __name__ == "__main__":
+    {"burn": burn, "idle": idle}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: sys.exit("usage: openrgb-ram burn|idle"))()

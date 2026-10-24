@@ -13,15 +13,20 @@ import java.util.Date
 object Notifier {
     private const val CH_BURN = "burn"
     private const val CH_ALERTS = "alerts"
+    private const val CH_RING = "ring"
+    private const val CH_WINDOW = "window"
     private const val ID_ONGOING = 1
     private const val ID_ALERT = 2
     private const val ID_WARN = 3
+    private const val ID_RING = 4
+    private const val ID_WINDOW = 5
     const val ACCENT = 0xFFE23A29.toInt()
 
     const val ACTION_NOW = "ca.heeney.ignition.internal.NOW"
     const val ACTION_SCRUB = "ca.heeney.ignition.internal.SCRUB"
     const val ACTION_EXTEND = "ca.heeney.ignition.internal.EXTEND"
     const val ACTION_SKIP = "ca.heeney.ignition.internal.SKIP"
+    const val ACTION_LW_START = "ca.heeney.ignition.internal.LW_START"
 
     fun channels(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -29,11 +34,27 @@ object Notifier {
             NotificationChannel(CH_BURN, "Burning", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "The countdown while a burn or T-minus is running"
                 setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             },
         )
         nm.createNotificationChannel(
             NotificationChannel(CH_ALERTS, "Liftoff & MECO", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Ignition, end of a burn, and T-minus warnings before scheduled launches"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            },
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_RING, "Liftoff ring", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Rings and lights up the lock screen when a scheduled T-minus lifts off"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                enableVibration(true)
+                setBypassDnd(true)
+            },
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_WINDOW, "Launch window", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "The nudge to start a burn after you get home"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             },
         )
     }
@@ -125,6 +146,52 @@ object Notifier {
     }
 
     fun cancelWarning(context: Context) = context.getSystemService(NotificationManager::class.java).cancel(ID_WARN)
+
+    /** Ring and light up the lock screen at liftoff. The full-screen intent opens [RingActivity]. */
+    fun ring(context: Context, minutes: Int) {
+        channels(context)
+        val full = PendingIntent.getActivity(
+            context, 40,
+            Intent(context, RingActivity::class.java).putExtra("minutes", minutes)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        context.getSystemService(NotificationManager::class.java).notify(
+            ID_RING,
+            builder(context, CH_RING)
+                .setContentTitle("Liftoff")
+                .setContentText(if (minutes > 0) "$minutes min burn. Phone down." else "Get to work.")
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setFullScreenIntent(full, true)
+                .setContentIntent(full)
+                .build(),
+        )
+    }
+
+    fun cancelRing(context: Context) = context.getSystemService(NotificationManager::class.java).cancel(ID_RING)
+
+    /** The launch-window nudge: a question with a one-tap start. */
+    fun launchWindow(context: Context, cfg: JSONObject) {
+        channels(context)
+        val tminus = cfg.optInt("tminus", 10)
+        val minutes = cfg.optInt("minutes", 50)
+        val start = action(context, ACTION_LW_START, 50) { it.putExtra("minutes", minutes).putExtra("delay", tminus) }
+        val label = if (tminus > 0) "Start T-minus $tminus" else "Ignite now"
+        context.getSystemService(NotificationManager::class.java).notify(
+            ID_WINDOW,
+            builder(context, CH_WINDOW)
+                .setContentTitle("Still on your phone?")
+                .setContentText("You've been home a while. $label for a $minutes min burn.")
+                .setStyle(Notification.BigTextStyle().bigText("You've been home a while. Light it up before the afternoon's gone — $label for a $minutes min burn."))
+                .setAutoCancel(true)
+                .setContentIntent(openApp(context, "ignite", 51))
+                .addAction(Notification.Action.Builder(null, label, start).build())
+                .build(),
+        )
+    }
+
+    fun cancelLaunchWindow(context: Context) = context.getSystemService(NotificationManager::class.java).cancel(ID_WINDOW)
 
     private fun upNext(context: Context): String? {
         val store = Store.get(context)
