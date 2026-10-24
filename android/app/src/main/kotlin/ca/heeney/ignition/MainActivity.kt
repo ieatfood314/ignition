@@ -73,7 +73,7 @@ class MainActivity : Activity() {
             WindowInsets.CONSUMED
         }
         setContentView(root)
-        web.loadUrl("file:///android_asset/index.html#" + (intent.getStringExtra(EXTRA_PAGE) ?: "need"))
+        web.loadUrl("file:///android_asset/index.html#" + (intent.getStringExtra(EXTRA_PAGE) ?: "ignite"))
 
         if (intent.getBooleanExtra("render_widgets", false)) renderWidgetPreviews()
         Notifier.channels(this)

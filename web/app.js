@@ -18,7 +18,7 @@ const state = {
   ignite: { phase: "idle", active: false, enforcers: [] },
   settings: null,
   clockOffset: 0,
-  page: "need",
+  page: "ignite",
   expanded: new Set(),
   pendingDelete: new Map(),
   rendered: new Set(),
@@ -1058,13 +1058,15 @@ $("#meco-go").onclick = async () => {
 
 /* ---------------- routing & lifecycle ---------------- */
 
+// Ignite is home: the app opens on the button, and the lists sit behind it.
 function route() {
-  const page = ["need", "want", "ignite"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "need";
+  const page = ["ignite", "need", "want"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "ignite";
   state.page = page;
   if (addDialog.open) addDialog.close();
   closeSortMenu();
   $$(".page").forEach((p) => { p.hidden = p.id !== `page-${page}`; });
   $$(".tabs a").forEach((a) => a.classList.toggle("active", a.dataset.tab === page));
+  $("#fab").hidden = page === "ignite";
   $("#fab").setAttribute("aria-label", page === "want" ? "Add something you want to do" : "Add something that needs doing");
 }
 
@@ -1074,7 +1076,7 @@ window.ignitionBack = () => {
   if (!$("#sort-menu").hidden) { closeSortMenu(); return true; }
   if (settingsDialog.open) { if (!settingsBack()) closeSettings(); return true; }
   for (const d of [addDialog, mecoDialog]) if (d.open) { d.close(); return true; }
-  if (state.page !== "need") { location.hash = "need"; return true; }
+  if (state.page !== "ignite") { location.hash = "ignite"; return true; }
   return false;
 };
 
@@ -1083,9 +1085,9 @@ document.addEventListener("keydown", (e) => {
   if (addDialog.open || settingsDialog.open || mecoDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
   if (e.key === "n" || e.key === "+" || e.key === "a") { e.preventDefault(); openAdd(); }
-  if (e.key === "1") location.hash = "need";
-  if (e.key === "2") location.hash = "want";
-  if (e.key === "3") location.hash = "ignite";
+  if (e.key === "1") location.hash = "ignite";
+  if (e.key === "2") location.hash = "need";
+  if (e.key === "3") location.hash = "want";
 });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) { loadItems(); loadIgnite(); loadSettings(); }

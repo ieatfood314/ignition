@@ -16,14 +16,14 @@
   <div id="burnbar" hidden><div></div></div>
 
   <header class="top">
-    <a class="brand" href="#need" aria-label="ignition">
+    <a class="brand" href="#ignite" aria-label="ignition">
       <svg viewBox="0 0 512 512" aria-hidden="true"><path class="flame" d=""/></svg>
       <span>ignition</span>
     </a>
     <nav class="tabs" aria-label="Pages">
+      <a href="#ignite" data-tab="ignite"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M10 2h4"/></svg><span id="tab-ignite-label">Ignite</span></a>
       <a href="#need" data-tab="need"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Need</span></a>
       <a href="#want" data-tab="want"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><span>Want</span></a>
-      <a href="#ignite" data-tab="ignite"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M10 2h4"/></svg><span id="tab-ignite-label">Ignite</span></a>
     </nav>
     <button class="icon-btn" id="settings-btn" type="button" aria-label="Settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
@@ -31,34 +31,6 @@
   </header>
 
   <main>
-    <section id="page-need" class="page list-page" data-list="need" hidden>
-      <div class="page-head">
-        <h1>Need to do</h1>
-        <span class="count" id="count-need"></span>
-        <button class="sort-btn" type="button" data-sort-for="need"></button>
-      </div>
-      <ul class="items" id="items-need"></ul>
-      <p class="empty" id="empty-need" hidden>Nothing due. Suspicious.</p>
-      <details class="done-group" id="done-need" hidden>
-        <summary></summary>
-        <ul class="items done"></ul>
-      </details>
-    </section>
-
-    <section id="page-want" class="page list-page" data-list="want" hidden>
-      <div class="page-head">
-        <h1>Want to do</h1>
-        <span class="count" id="count-want"></span>
-        <button class="sort-btn" type="button" data-sort-for="want"></button>
-      </div>
-      <ul class="items" id="items-want"></ul>
-      <p class="empty" id="empty-want" hidden>Nothing here yet.</p>
-      <details class="done-group" id="done-want" hidden>
-        <summary></summary>
-        <ul class="items done"></ul>
-      </details>
-    </section>
-
     <section id="page-ignite" class="page" hidden>
       <div class="ignite-wrap">
         <div class="dial" id="dial">
@@ -121,6 +93,34 @@
           <ul></ul>
         </div>
       </div>
+    </section>
+
+    <section id="page-need" class="page list-page" data-list="need" hidden>
+      <div class="page-head">
+        <h1>Need to do</h1>
+        <span class="count" id="count-need"></span>
+        <button class="sort-btn" type="button" data-sort-for="need"></button>
+      </div>
+      <ul class="items" id="items-need"></ul>
+      <p class="empty" id="empty-need" hidden>Nothing due. Suspicious.</p>
+      <details class="done-group" id="done-need" hidden>
+        <summary></summary>
+        <ul class="items done"></ul>
+      </details>
+    </section>
+
+    <section id="page-want" class="page list-page" data-list="want" hidden>
+      <div class="page-head">
+        <h1>Want to do</h1>
+        <span class="count" id="count-want"></span>
+        <button class="sort-btn" type="button" data-sort-for="want"></button>
+      </div>
+      <ul class="items" id="items-want"></ul>
+      <p class="empty" id="empty-want" hidden>Nothing here yet.</p>
+      <details class="done-group" id="done-want" hidden>
+        <summary></summary>
+        <ul class="items done"></ul>
+      </details>
     </section>
   </main>
 

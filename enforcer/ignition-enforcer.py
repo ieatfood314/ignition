@@ -17,6 +17,7 @@ the server is unreachable.
 
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -183,7 +184,8 @@ class Enforcer:
             raise RuntimeError(f"nft: {r.stderr.strip()}")
 
     def clear_nft(self):
-        run(["nft", "delete", "table", "inet", NFT_TABLE])
+        if shutil.which("nft"):  # only port blocks need nftables, so it may not be installed
+            run(["nft", "delete", "table", "inet", NFT_TABLE])
 
     def pid_allowed(self, pid):
         try:

@@ -170,7 +170,7 @@ dialog.sheet[open] { animation: pop .18s ease-out; }
 
 /* ---------- ignite page ---------- */
 .ignite-wrap { display: flex; flex-direction: column; align-items: center; padding-top: 4vh; }
-.dial { position: relative; width: min(76vw, 340px); aspect-ratio: 1; display: grid; place-items: center; }
+.dial { position: relative; width: min(80vw, 420px); aspect-ratio: 1; display: grid; place-items: center; }
 .ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring-track { stroke: var(--line); stroke-width: 3; }
 .ring-fill { stroke: var(--accent); stroke-width: 3; stroke-dasharray: 578.05; stroke-dashoffset: 578.05; transition: stroke-dashoffset 1s linear; filter: drop-shadow(0 0 6px var(--accent-glow)); }
@@ -187,7 +187,7 @@ dialog.sheet[open] { animation: pop .18s ease-out; }
 /* The label sits dead centre; the sub-line hangs below it without pushing it up. */
 .ignite-face { position: relative; display: block; }
 .ignite-label {
-  display: block; line-height: 1; font-size: clamp(30px, 9vw, 44px); font-weight: 800;
+  display: block; line-height: 1; font-size: clamp(30px, 9vw, 50px); font-weight: 800;
   letter-spacing: .18em; padding-left: .18em; font-variant-numeric: tabular-nums;
   /* Caps have no descenders, so trim the line box to the cap height or they sit high. */
   text-box: trim-both cap alphabetic;

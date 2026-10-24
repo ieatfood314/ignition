@@ -1,7 +1,7 @@
 {
   "name": "ignition",
   "short_name": "ignition",
-  "start_url": "./#need",
+  "start_url": "./#ignite",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
