@@ -33,19 +33,46 @@ def run(*args):
     return subprocess.run([openrgb(), *args], capture_output=True, text=True, timeout=45)
 
 
+# Product-name tokens for RGB RAM, since older OpenRGB `--list-devices` prints no device type.
+DRAM_NAMES = ("dram", "fury", "vengeance", "trident", "ballistix", "dominator", "ripjaws",
+              "spectrix", "hyperx", "xpg", "aegis", "predator ram", "viper steel")
+
+
+def devices():
+    """[(index, name)] from `--list-devices` (index line "N: Name"), ignoring per-device detail lines."""
+    out = []
+    for line in run("--list-devices").stdout.splitlines():
+        m = re.match(r"^(\d+):\s+(.*\S)", line)
+        if m:
+            out.append((int(m.group(1)), m.group(2)))
+    return out
+
+
 def dram_indices():
-    out = run("--list-devices").stdout
-    indices = []
-    # "0: Corsair Vengeance\n    Type:           DRAM" — index line, then a Type line.
+    """Which devices to recolour. $IGNITION_RGB_DEVICES (comma-separated indices or name substrings)
+    pins it exactly; otherwise anything whose type or name looks like RAM."""
+    devs = devices()
+    override = os.environ.get("IGNITION_RGB_DEVICES", "").strip()
+    if override:
+        picks = []
+        for tok in (t.strip() for t in override.split(",") if t.strip()):
+            if tok.isdigit():
+                picks += [i for i, _ in devs if i == int(tok)]
+            else:
+                picks += [i for i, n in devs if tok.lower() in n.lower()]
+        return sorted(set(picks))
+    # Newer OpenRGB prints "Type: DRAM"; fall back to known RAM product names.
+    typed = []
     cur = None
-    for line in out.splitlines():
+    for line in run("--list-devices").stdout.splitlines():
         m = re.match(r"^(\d+):\s", line)
         if m:
             cur = int(m.group(1))
         elif cur is not None and "Type:" in line and "DRAM" in line:
-            indices.append(cur)
-            cur = None
-    return indices
+            typed.append(cur)
+    if typed:
+        return typed
+    return [i for i, n in devs if any(tok in n.lower() for tok in DRAM_NAMES)]
 
 
 def burn():
