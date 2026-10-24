@@ -56,8 +56,14 @@ It asks for your password once, because blocking sites and closing programs need
 prints the address to open, normally **http://127.0.0.1:4580**. Bookmark it, then go to **⚙ → Blocking** to
 choose what gets blocked.
 
-Run the same command again any time to update. You need Python 3 and systemd, which nearly every Linux
-desktop already has.
+You need Python 3 and systemd, which nearly every Linux desktop already has. To update later, run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ieatfood314/ignition/main/update.sh | sh
+```
+
+Use [topgrade](https://github.com/topgrade-rs/topgrade)? Put that line in `~/.config/topgrade.toml` under
+`[commands]` as `"ignition" = "…"` and ignition updates along with everything else.
 
 <details>
 <summary>Rather read the script before running it?</summary>

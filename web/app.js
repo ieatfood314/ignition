@@ -458,7 +458,18 @@ const RING = 2 * Math.PI * 92;
 const serverNow = () => Date.now() / 1000 + state.clockOffset;
 let arming = null;
 
+// A new version of the page was deployed: reload to pick it up, once nothing is half-done.
+function reloadIfStale(build) {
+  if (!build) return; // the Android app updates as a whole
+  state.build = state.build || build;
+  if (build === state.build) return;
+  const busy = arming || addDialog.open || settingsDialog.open || mecoDialog.open ||
+    ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
+  if (!busy) location.reload();
+}
+
 function setIgnite(s, quiet) {
+  reloadIfStale(s.build);
   const was = state.ignite;
   state.clockOffset = s.now - Date.now() / 1000;
   state.ignite = s;

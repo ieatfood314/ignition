@@ -11,6 +11,12 @@ val keystoreProps = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+// Each commit is its own build: versionCode is the number of commits, so a newer commit always updates in place.
+val commitCount: Int = runCatching {
+    val git = ProcessBuilder("git", "rev-list", "--count", "HEAD").directory(rootDir).redirectErrorStream(true).start()
+    git.inputStream.bufferedReader().readText().trim().toInt().takeIf { git.waitFor() == 0 }
+}.getOrNull() ?: 1
+
 android {
     namespace = "ca.heeney.ignition"
     compileSdk = 35
@@ -19,8 +25,8 @@ android {
         applicationId = "ca.heeney.ignition"
         minSdk = 29
         targetSdk = 35
-        versionCode = (project.property("ignitionVersionCode") as String).toInt()
-        versionName = project.property("ignitionVersionName") as String
+        versionCode = commitCount
+        versionName = "${project.property("ignitionVersion")}.$commitCount"
     }
 
     signingConfigs {

@@ -40,6 +40,19 @@ Piped from `curl`, the installer first clones the repo into `~/.local/share/igni
 tarball if git isn't installed) and runs from there. Running it again pulls the latest version. A burn
 started on the server keeps going through updates.
 
+### Updating
+
+`update.sh` updates whatever ignition has on a computer to the latest `main`: it fast-forwards the app's
+checkout and restarts the app if `server/` changed (open pages reload themselves when `web/` changes), then
+reinstalls the blocker, keeping its settings, if there's a new commit. It's built to run from topgrade:
+
+```toml
+[commands]
+"ignition" = "curl -fsSL https://raw.githubusercontent.com/ieatfood314/ignition/main/update.sh | sh"
+```
+
+On phones, [Obtainium](https://obtainium.imranr.dev/) pointed at this repo installs each new release.
+
 Not on Linux? The server still runs anywhere Python 3 does: `python3 server/ignition.py`, then open
 http://127.0.0.1:4580. You just don't get the blocker or the background service.
 
@@ -138,6 +151,13 @@ To drive ignition *from* Tasker, use **Send Intent** → *Broadcast Receiver*, p
 | `ca.heeney.ignition.EXTEND` | `minutes` (default 15) |
 
 ### Building
+
+Each commit is its own build: the `versionCode` is the number of commits on `main` and the version is
+`<ignitionVersion>.<that number>` (e.g. `2.1.12`), so a build of any newer commit installs over an older one.
+
+`android/autobuild.sh install`, on the build machine, sets up a user timer that checks GitHub every minute
+and publishes a release tagged `v<version>` for every commit on `main` that changes `android/` or `web/`.
+Obtainium then picks it up. It needs the toolchain and signing key below, and `gh` logged in.
 
 Needs JDK 17, Gradle and Android SDK 35. `android/build.sh` expects them in `~/.local/android-toolchain`
 and signs releases with `~/.config/ignition/release.jks` (via `keystore.properties`).

@@ -10,6 +10,7 @@ Times are unix seconds except updated_at.
 """
 
 import argparse
+import hashlib
 import json
 import mimetypes
 import os
@@ -86,6 +87,15 @@ MIGRATIONS = {
         ("rev", "INTEGER NOT NULL DEFAULT 0"),
     ],
 }
+
+
+def web_build():
+    """Changes whenever a file under web/ does, so open pages know to reload after a deploy."""
+    h = hashlib.sha1()
+    for f in sorted(WEB_DIR.iterdir()):
+        st = f.stat()
+        h.update(f"{f.name}:{st.st_mtime_ns}:{st.st_size};".encode())
+    return h.hexdigest()[:12]
 
 
 def now():
@@ -575,7 +585,7 @@ class App:
         state = {
             "now": t, "phase": phase, "active": phase == "burning", "enforcers": enforcers,
             "session": self.session_out(row) if row else None,
-            "next_schedule": self.next_schedule(t), "stats": self.stats(t),
+            "next_schedule": self.next_schedule(t), "stats": self.stats(t), "build": web_build(),
         }
         if row:
             planned = row["planned"] or row["minutes"]

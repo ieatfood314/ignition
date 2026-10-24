@@ -37,6 +37,7 @@ if [ -f "$unit" ]; then
     fi
 fi
 [ ! -d "$data/app" ] || rm -rf "$data/app"
+rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/ignition"
 
 if [ -f /etc/systemd/system/ignition-enforcer.service ]; then
     echo "Removing the blocker (it needs your password)…"
