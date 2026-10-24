@@ -75,28 +75,36 @@ class BlockerService : AccessibilityService() {
 
     // ---- browser address bars
 
+    /**
+     * The URL of the page the browser is showing, or null. Returns null while you're typing in the
+     * address bar: autocomplete fills it with suggestions ("you" -> "youtube.com") and the suggestion
+     * list is full of URLs, none of which you've opened. Once a page loads the bar loses focus.
+     */
     private fun addressBarText(pkg: String): String? {
         val root = rootInActiveWindow ?: return null
         try {
+            val typing = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.isEditable == true
+            if (typing) return null
             for (id in URL_BAR_IDS) {
                 // Classic Android view ids are "pkg:id/name"; Compose testTags (ADDRESSBAR_URL) are the
                 // bare string. Firefox's redesigned toolbar is Compose, so try both forms.
                 val forms = if (id.contains(":")) listOf(id) else listOf(id, "$pkg:id/$id")
                 for (form in forms) {
                     for (n in root.findAccessibilityNodeInfosByViewId(form)) {
+                        if (n.isFocused) continue
                         val t = n.text ?: n.contentDescription
                         if (!t.isNullOrBlank()) return t.toString()
                     }
                 }
             }
-            // Fallback for toolbars we don't have an id for: the editable/url-ish node nearest the top.
+            // Fallback for toolbars we don't have an id for: an unfocused text field outside any list
+            // (suggestion rows and top-site tiles are list items).
             return scanForUrl(root)
         } finally {
             root.recycle()
         }
     }
 
-    /** Breadth-first walk for an address-bar-like node (editable, or a url/address/origin view id). */
     private fun scanForUrl(root: AccessibilityNodeInfo): String? {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -104,11 +112,9 @@ class BlockerService : AccessibilityService() {
         while (queue.isNotEmpty() && seen < 500) {
             val n = queue.removeFirst()
             seen++
-            val vid = n.viewIdResourceName?.lowercase() ?: ""
-            val looksUrl = n.isEditable ||
-                (n.className?.contains("EditText") == true) ||
-                vid.contains("url") || vid.contains("address") || vid.contains("origin")
-            if (looksUrl) {
+            if (n.collectionItemInfo != null) continue
+            val field = n.isEditable || n.className?.contains("EditText") == true
+            if (field && !n.isFocused) {
                 val t = n.text ?: n.contentDescription
                 if (!t.isNullOrBlank()) return t.toString()
             }
