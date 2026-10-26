@@ -183,9 +183,10 @@ object Reactor {
     }
 
     /**
-     * Minute ticks keep the time left in notifications and widgets current while something counts down.
-     * They land as the minute changes, so "T-12 min" turns into "T-11 min" on time; non-wakeup, so they
-     * cost nothing asleep and catch up as soon as the screen comes on.
+     * Minute ticks keep widgets, the burn's progress bar and the notifications' fallback titles current while
+     * something counts down (the notifications' own T-02:46 ticks by itself). They land as the minute changes,
+     * so "T-12" turns into "T-11" on time; non-wakeup, so they cost nothing asleep and catch up as soon as
+     * the screen comes on.
      */
     private fun armTick(app: Context, cur: Logic.Current, next: JSONObject?, t: Long) {
         val am = app.getSystemService(AlarmManager::class.java)

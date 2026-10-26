@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import android.text.format.DateFormat
+import android.widget.RemoteViews
 import org.json.JSONObject
 import java.util.Date
 
@@ -78,6 +80,20 @@ object Notifier {
         .setSmallIcon(R.drawable.ic_flame)
         .setColor(ACCENT)
 
+    /**
+     * A live "T-02:46" countdown to [edge]: [title] is a Chronometer format ("T-%s ..."), which System UI ticks
+     * every second without us re-posting. Builder's plain title and text stay as the fallback for places that
+     * don't draw custom views, like watches.
+     */
+    private fun Notification.Builder.countdown(context: Context, edge: Long, title: String, text: String) = apply {
+        val view = RemoteViews(context.packageName, R.layout.notification_countdown)
+        // Chronometer drops the fraction of a second; +999 ms rounds it up like the web app, so 00:00 is liftoff.
+        view.setChronometer(R.id.title, SystemClock.elapsedRealtime() + edge * 1000 - System.currentTimeMillis() + 999, title, true)
+        view.setChronometerCountDown(R.id.title, true)
+        view.setTextViewText(R.id.text, text)
+        setCustomContentView(view).setStyle(Notification.DecoratedCustomViewStyle())
+    }
+
     fun ongoing(context: Context, cur: Logic.Current) {
         val nm = context.getSystemService(NotificationManager::class.java)
         val s = cur.session
@@ -89,21 +105,21 @@ object Notifier {
         val b = builder(context, CH_BURN)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setShowWhen(true)
-            .setUsesChronometer(true)
-            .setChronometerCountDown(true)
             .setCategory(Notification.CATEGORY_PROGRESS)
             .setContentIntent(openApp(context, "ignite", 10))
         if (cur.phase == "countdown") {
-            b.setWhen(s.optLong("starts_at") * 1000)
-                .setContentTitle("${Logic.tminus(s.optLong("starts_at"), Logic.now())} · ignition at ${clock(context, s.optLong("starts_at"))}")
-                .setContentText("${s.optInt("minutes")} min burn. Enjoy the break.")
+            val at = s.optLong("starts_at")
+            val title = "ignition at ${clock(context, at)}"
+            val text = "${s.optInt("minutes")} min burn. Enjoy the break."
+            b.setContentTitle("${Logic.tminus(at, Logic.now())} · $title")
+                .setContentText(text)
+                .countdown(context, at, "T-%s · $title", text)
                 .addAction(Notification.Action.Builder(null, "Ignite now", action(context, ACTION_NOW, 11)).build())
                 .addAction(Notification.Action.Builder(null, "Scrub", action(context, ACTION_SCRUB, 12)).build())
         } else {
             val total = (s.optLong("ends_at") - s.optLong("starts_at")).coerceAtLeast(1)
             val elapsed = (Logic.now() - s.optLong("starts_at")).coerceIn(0, total)
-            b.setWhen(s.optLong("ends_at") * 1000)
+            b.setWhen(s.optLong("ends_at") * 1000).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
                 .setContentTitle("Burning · locked until ${clock(context, s.optLong("ends_at"))}")
                 .setContentText(upNext(context) ?: "No way out. Get to work.")
                 .setProgress(total.toInt(), elapsed.toInt(), false)
@@ -121,16 +137,17 @@ object Notifier {
         )
     }
 
-    /** Posts the warning, or re-posts it silently with the time left updated. */
+    /** Posts the warning, or re-posts it silently to keep the fallback title current. */
     fun warning(context: Context, next: JSONObject) {
         channels(context)
         val at = next.optLong("at")
+        val text = "Scheduled ignition at ${clock(context, at)} · ${next.optInt("minutes")} min burn"
         context.getSystemService(NotificationManager::class.java).notify(
             ID_WARN,
             builder(context, CH_ALERTS)
                 .setContentTitle(Logic.tminus(at, Logic.now()))
-                .setContentText("Scheduled ignition at ${clock(context, at)} · ${next.optInt("minutes")} min burn")
-                .setWhen(at * 1000).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
+                .setContentText(text)
+                .countdown(context, at, "T-%s", text)
                 .setTimeoutAfter((at - Logic.now() + 5) * 1000)
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
