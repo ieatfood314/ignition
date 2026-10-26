@@ -115,7 +115,7 @@ object Notifier {
                 .setContentText(text)
                 .countdown(context, at, "T-%s · $title", text)
                 .addAction(Notification.Action.Builder(null, "Ignite now", action(context, ACTION_NOW, 11)).build())
-                .addAction(Notification.Action.Builder(null, "Scrub", action(context, ACTION_SCRUB, 12)).build())
+            if (Logic.canScrub(s)) b.addAction(Notification.Action.Builder(null, "Scrub", action(context, ACTION_SCRUB, 12)).build())
         } else {
             val total = (s.optLong("ends_at") - s.optLong("starts_at")).coerceAtLeast(1)
             val elapsed = (Logic.now() - s.optLong("starts_at")).coerceIn(0, total)

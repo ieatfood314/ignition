@@ -195,7 +195,9 @@ object Reactor {
             cur.session?.optLong(if (cur.phase == "countdown") "starts_at" else "ends_at"),
             next?.takeIf { Logic.warns(it, t) }?.optLong("at"),
         )
-        val at = edges.mapNotNull { Logic.nextMinute(it, t) }.minOrNull()
+        // Also when scrubbing locks, so the notification's Scrub button goes on time.
+        val scrubLock = cur.session?.takeIf { cur.phase == "countdown" }?.let { Logic.scrubUntil(it) }?.takeIf { it > t }
+        val at = (edges.mapNotNull { Logic.nextMinute(it, t) } + listOfNotNull(scrubLock)).minOrNull()
         when {
             at == null -> am.cancel(tick)
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms() -> am.set(AlarmManager.RTC, at * 1000, tick)

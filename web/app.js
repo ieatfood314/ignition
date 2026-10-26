@@ -522,6 +522,7 @@ function renderIgnite() {
     $("#extend").hidden = false;
     $("#stop-btn").hidden = !s.can_stop;
     $("#locked-note").hidden = !!s.can_stop;
+    $("#locked-note").textContent = "No way out. Get to work.";
     $("#scrub-btn").hidden = true;
     tabLabel = fmtClock(remaining);
     barFrac = 1 - remaining / total;
@@ -534,8 +535,12 @@ function renderIgnite() {
     $("#until").textContent = `Ignition at ${fmtTime(sess.starts_at)} · ${fmtEstimate(sess.minutes)} burn`;
     $("#extend").hidden = true;
     $("#stop-btn").hidden = true;
-    $("#locked-note").hidden = true;
-    $("#scrub-btn").hidden = false;
+    // Under an hour to liftoff it's committed, bar a minute's grace right after setting it.
+    const scrubLeft = (s.scrub_until ?? Infinity) - t;
+    $("#locked-note").hidden = scrubLeft > 0;
+    $("#locked-note").textContent = "Committed. No scrubbing now.";
+    $("#scrub-btn").hidden = scrubLeft <= 0;
+    $("#scrub-btn").textContent = scrubLeft <= 3600 ? `Scrub launch · ${fmtClock(scrubLeft)}` : "Scrub launch";
     tabLabel = `T–${fmtClock(left)}`;
   } else if (arming) {
     $("#ignite-label").textContent = arming.count;

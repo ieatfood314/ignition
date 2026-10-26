@@ -62,6 +62,17 @@ class LogicTest {
     }
 
     @Test
+    fun scrubLocksAnHourOutAfterAMinutesGrace() {
+        val t = Logic.now()
+        val short = Logic.newSession("a", 50, t + 30 * 60, "manual")
+        assertTrue(Logic.canScrub(short, t + 59))
+        assertFalse(Logic.canScrub(short, t + 60))
+        val long = Logic.newSession("b", 50, t + 3 * 3600, "manual")
+        assertTrue(Logic.canScrub(long, t + 2 * 3600 - 1))
+        assertFalse(Logic.canScrub(long, t + 2 * 3600))
+    }
+
+    @Test
     fun statsCountOnlyBurnedTime() {
         val s = store()
         val t = Logic.now()

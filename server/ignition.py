@@ -27,6 +27,8 @@ from urllib.parse import parse_qs, urlparse
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 LISTS = ("need", "want")
 EARLY_STOP_OVER_MINUTES = 60
+SCRUB_LOCK = 3600  # seconds before liftoff after which a countdown can't be scrubbed...
+SCRUB_GRACE = 60  # ...unless it was set less than this many seconds ago
 MAX_MINUTES = 12 * 60
 MAX_DELAY = 24 * 60
 SCHEDULE_WINDOW = 120  # seconds after a scheduled time during which it may still fire
@@ -418,6 +420,11 @@ class App:
             return "countdown", live[0]
         return "idle", None
 
+    @staticmethod
+    def scrub_until(row):
+        """When scrubbing this countdown stops being allowed: an hour out, or a minute after setting it."""
+        return max((row["created_at"] or 0) + SCRUB_GRACE, row["started_at"] - SCRUB_LOCK)
+
     def insert_session(self, uid, minutes, starts_at, source, planned=None):
         t = now()
         with self.s.lock:
@@ -468,6 +475,8 @@ class App:
             phase, row = self.current()
             if phase != "countdown":
                 raise ApiError(409, "nothing to scrub")
+            if now() >= self.scrub_until(row):
+                raise ApiError(403, "under an hour to liftoff: no scrubbing")
             self.touch_session(row, stopped_at=now())
         return self.ignite_state()
 
@@ -594,6 +603,8 @@ class App:
                 session_id=row["uid"], minutes=row["minutes"], started_at=row["started_at"],
                 ends_at=row["ends_at"], can_stop=planned > EARLY_STOP_OVER_MINUTES,
             )
+            if phase == "countdown":
+                state["scrub_until"] = self.scrub_until(row)
         return state
 
     def heartbeat(self, body):

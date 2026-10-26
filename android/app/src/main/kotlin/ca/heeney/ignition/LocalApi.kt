@@ -133,7 +133,10 @@ class LocalApi(private val context: Context) {
         return touchCurrent("burning") { it.put("stopped_at", Logic.now()) }
     }
 
-    fun scrub(): JSONObject = touchCurrent("countdown") { it.put("stopped_at", Logic.now()) }
+    fun scrub(): JSONObject = touchCurrent("countdown") {
+        if (!Logic.canScrub(it)) throw ApiError(403, "under an hour to liftoff: no scrubbing")
+        it.put("stopped_at", Logic.now())
+    }
 
     fun igniteNow(): JSONObject = touchCurrent("countdown") {
         val t = Logic.now()

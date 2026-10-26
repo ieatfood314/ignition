@@ -109,8 +109,8 @@ hits zero.
 - **Longer burns** get a hold-to-end button, because once in a while a two-hour block really does need to
   end.
 - **You can always add time** (+5, +15, +30), but never take it away.
-- **T-minus** starts a burn after a delay, so you can take a break first. Until it lifts off you can still
-  scrub it or ignite early.
+- **T-minus** starts a burn after a delay, so you can take a break first. You can ignite early any time, but
+  you can only scrub it while liftoff is more than an hour away (or in the first minute after you set it).
 - **When a burn ends**, you can light a *second stage* to keep going.
 
 The **Need** and **Want** tabs are two simple lists: things you need to do (with due dates) and things

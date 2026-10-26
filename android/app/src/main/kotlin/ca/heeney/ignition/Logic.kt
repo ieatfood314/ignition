@@ -20,6 +20,8 @@ object Logic {
     const val EARLY_STOP_OVER_MINUTES = 60
     const val MAX_MINUTES = 12 * 60
     const val MAX_DELAY = 24 * 60
+    const val SCRUB_LOCK = 3600L // seconds before liftoff after which a countdown can't be scrubbed...
+    const val SCRUB_GRACE = 60L // ...unless it was set less than this many seconds ago
     private const val SCHEDULE_WINDOW = 120L
     private val ymd = DateTimeFormatter.ofPattern("yyyyMMdd")
 
@@ -41,6 +43,10 @@ object Logic {
 
     fun planned(s: JSONObject): Int = s.intOrNull("planned") ?: s.optInt("minutes")
     fun canStop(s: JSONObject): Boolean = planned(s) > EARLY_STOP_OVER_MINUTES
+
+    /** When scrubbing this countdown stops being allowed: an hour out, or a minute after setting it. */
+    fun scrubUntil(s: JSONObject): Long = maxOf(s.optLong("created_at") + SCRUB_GRACE, s.optLong("starts_at") - SCRUB_LOCK)
+    fun canScrub(s: JSONObject, t: Long = now()): Boolean = t < scrubUntil(s)
 
     fun newSession(id: String, minutes: Int, startsAt: Long, source: String): JSONObject = JSONObject()
         .put("id", id).put("minutes", minutes).put("planned", minutes).put("created_at", now())
@@ -176,6 +182,7 @@ object Logic {
             state.put("session_id", s.optString("id")).put("minutes", s.optInt("minutes"))
                 .put("started_at", s.optLong("starts_at")).put("ends_at", s.optLong("ends_at"))
                 .put("can_stop", canStop(s))
+            if (cur.phase == "countdown") state.put("scrub_until", scrubUntil(s))
         }
         return state
     }
