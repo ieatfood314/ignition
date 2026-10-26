@@ -19,9 +19,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * Shown full-screen over the lock screen when a T-minus lifts off and "ring at liftoff" is on. Buzzes, and
- * plays a rocket launch (or your ringtone, or nothing) on the alarm stream until you look and tap. Launched by a full-screen-intent notification so it can wake
- * the screen; the notification also carries the text, so the lock screen shows it either way.
+ * Shown full-screen over the lock screen when a T-minus lifts off and "ring at liftoff" is on. Rocket and
+ * Buzz are short: one rocket launch of a few seconds and a couple of buzzes. Ringtone rings until you tap.
+ * Launched by a full-screen-intent notification so it can wake the screen; the notification also carries the text, so the lock screen shows it either way.
  */
 class RingActivity : Activity() {
     private var ringtone: Ringtone? = null
@@ -64,7 +64,7 @@ class RingActivity : Activity() {
             setPadding(0, 24, 0, 48)
         })
         root.addView(Button(this).apply {
-            text = "Stop ringing"
+            text = "Got it"
             setOnClickListener { finish() }
         })
         setContentView(root)
@@ -73,26 +73,24 @@ class RingActivity : Activity() {
     }
 
     private fun startRinging() {
-        buzz()
-        when (sound(this)) {
+        val sound = sound(this)
+        buzz(repeat = sound == "ringtone")
+        when (sound) {
             "rocket" -> rocket()
             "ringtone" -> ringtone()
         }
     }
 
-    private fun buzz() {
+    private fun buzz(repeat: Boolean) {
         vibrator = getSystemService(Vibrator::class.java)?.takeIf { it.hasVibrator() }?.apply {
-            // A long rumble, then a beat, like the sound.
-            vibrate(VibrationEffect.createWaveform(longArrayOf(0, 900, 400, 300, 400), 1), ALARM)
+            // A rumble and a short one, once; or over and over alongside a ringtone.
+            vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 300, 300, 600), if (repeat) 1 else -1), ALARM)
         }
     }
 
     private fun rocket() {
         val am = getSystemService(AudioManager::class.java)
-        player = MediaPlayer.create(this, R.raw.liftoff, ALARM, am.generateAudioSessionId())?.apply {
-            isLooping = true
-            start()
-        }
+        player = MediaPlayer.create(this, R.raw.liftoff, ALARM, am.generateAudioSessionId())?.apply { start() }
     }
 
     private fun ringtone() {
