@@ -56,6 +56,9 @@ It asks for your password once, because blocking sites and closing programs need
 prints the address to open, normally **http://127.0.0.1:4580**. Bookmark it, then go to **⚙ → Blocking** to
 choose what gets blocked.
 
+On KDE Plasma it also adds three desktop and panel widgets: the Ignite dial, *Next up* and *Burn goals*. Right-click
+the desktop, choose **Add Widgets** and search for *ignition*.
+
 You need Python 3 and systemd, which nearly every Linux desktop already has. To update later, run:
 
 ```sh

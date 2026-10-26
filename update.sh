@@ -57,6 +57,21 @@ main() {
         fi
     fi
 
+    # The KDE Plasma widgets go in on the first update that finds Plasma, then stay current unless removed.
+    widgets="${XDG_DATA_HOME:-$HOME/.local/share}/plasma/plasmoids/ca.heeney.ignition"
+    mark="$(dirname "$state")/widgets-commit"
+    if [ -n "$code" ] && [ -d "$code/plasma" ] && command -v kpackagetool6 >/dev/null; then
+        head=$(git -C "$code" rev-parse HEAD)
+        last=$(cat "$mark" 2>/dev/null || true)
+        if [ -z "$last" ] || { [ -d "$widgets" ] && ! git -C "$code" diff --quiet "$last" "$head" -- plasma; }; then
+            sh "$code/plasma/install.sh" >/dev/null
+            if [ -z "$last" ]; then say "added the KDE Plasma widgets (Add Widgets › search for ignition)"
+            else say "Plasma widgets updated; they load when Plasma restarts: systemctl --user restart plasma-plasmashell"; fi
+        fi
+        mkdir -p "$(dirname "$mark")"
+        echo "$head" >"$mark"
+    fi
+
     [ -n "$code" ] || say "not installed on this computer"
 }
 main "$@"; exit

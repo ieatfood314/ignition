@@ -70,4 +70,11 @@ for p in files:
 PY
 fi
 
+if command -v kpackagetool6 >/dev/null; then
+    for w in ca.heeney.ignition ca.heeney.ignition.next ca.heeney.ignition.goals; do
+        kpackagetool6 -t Plasma/Applet -r "$w" >/dev/null 2>&1 || true
+    done
+    rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/ca.heeney.ignition.svg"
+fi
+
 echo "ignition is uninstalled. Your lists are still in $data (delete it to remove them)."

@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "ca.heeney.ignition.goals",
+        "Name": "Ignition · Burn goals",
+        "Description": "Time burned today and this week, against your goals",
+        "Icon": "ca.heeney.ignition",
+        "Category": "Utilities",
+        "Authors": [{ "Name": "Aidan Heeney" }],
+        "Website": "https://github.com/ieatfood314/ignition",
+        "Version": "@VERSION@",
+        "FormFactors": ["desktop", "panel"]
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

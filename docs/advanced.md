@@ -17,6 +17,7 @@ web/                            the frontend (also bundled into the Android app)
 enforcer/ignition-enforcer.py   root daemon on each computer that applies the blocks
 enforcer/openrgb-ram            optional burn/idle RGB hook
 enforcer/install.sh             installs the enforcer as a system service
+plasma/                         KDE Plasma 6 widgets (QML), talking to the server's API
 install.sh                      installs the server as a user service (+ the enforcer, + Tailscale Serve)
 uninstall.sh                    removes both, and the browser policies the enforcer set
 android/                        the Android app (Kotlin, no dependencies)
@@ -119,6 +120,27 @@ even if the server is unreachable. Stopping the enforcer cleanly lifts everythin
 ```sh
 sudo systemctl stop ignition-enforcer
 ```
+
+## KDE Plasma widgets
+
+Three widgets for Plasma 6, in the same Nothing-style dot-matrix as the Android ones. Each works on the desktop
+or in a panel, where it shrinks to an icon and opens as a popup:
+
+- **Ignition**: the dial. Idle it's a flame; click it to arm a burn (3, 2, 1, click again to scrub), with the
+  burn length and T-minus set by − / + or the scroll wheel. During a T-minus: *Ignite now*, and *Scrub* until
+  it locks an hour out. While burning: a ring of dots burning down, +5/+15/+30, and *Hold to end* for burns
+  over an hour. Also today's goal, the next scheduled launch (with *Skip*) and each computer's blocker. In a
+  panel, the ring and the minutes left.
+- **Next up**: the top of the Need list in the website's order. Click a dot to check it off, or *+ Add* one.
+  In a panel, how many are left, with a red dot when something's due.
+- **Burn goals**: today and this week against your goals, and the last seven days as columns of dots. In a
+  panel, a ring for today's goal.
+
+`install.sh` and `update.sh` install them when they find Plasma 6 (`kpackagetool6`); on its own,
+`plasma/install.sh [--server URL]`. They talk to the app on this computer, or else the one its blocker follows;
+change it in each widget's settings. They use Nothing's *Ndot 57* and *Lettera Mono* fonts when installed, and
+a plain monospace otherwise. Plasma loads updated widgets when it restarts:
+`systemctl --user restart plasma-plasmashell`.
 
 ## Android app
 

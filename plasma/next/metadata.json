@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "ca.heeney.ignition.next",
+        "Name": "Ignition · Next up",
+        "Description": "The top of your Need list, to check off as you go",
+        "Icon": "ca.heeney.ignition",
+        "Category": "Utilities",
+        "Authors": [{ "Name": "Aidan Heeney" }],
+        "Website": "https://github.com/ieatfood314/ignition",
+        "Version": "@VERSION@",
+        "FormFactors": ["desktop", "panel"]
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

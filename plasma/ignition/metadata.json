@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "ca.heeney.ignition",
+        "Name": "Ignition",
+        "Description": "Ignite a burn, and watch it count down",
+        "Icon": "ca.heeney.ignition",
+        "Category": "Utilities",
+        "Authors": [{ "Name": "Aidan Heeney" }],
+        "Website": "https://github.com/ieatfood314/ignition",
+        "Version": "@VERSION@",
+        "FormFactors": ["desktop", "panel"]
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
