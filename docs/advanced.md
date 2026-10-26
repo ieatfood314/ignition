@@ -132,7 +132,7 @@ sudo systemctl stop ignition-enforcer
   *+15 min*. *Liftoff*, *main engine cutoff* and T-minus warnings show on the lock screen.
 - **Ring at liftoff** (optional): a scheduled T-minus can ring the phone and wake the lock screen, so you
   can't sleep through the start of a session. It buzzes and plays a rocket launch by default (NASA's SLS
-  test fire: "three, two, one", ignition); pick *Buzz* for vibration only or *Ringtone* for your phone's
+  engine test fire, from ignition); pick *Buzz* for vibration only or *Ringtone* for your phone's
   ringtone. *Test* plays it.
 - **Do Not Disturb while burning** (optional). Switched back afterwards, but only if you haven't touched it
   yourself.
