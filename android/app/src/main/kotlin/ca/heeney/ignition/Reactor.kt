@@ -47,6 +47,7 @@ object Reactor {
         }
         if (created) Sync.kick(app)
         transitions(app, cur, t)
+        if (cur.phase == "burning") BlockerService.recheck()
         Notifier.ongoing(app, cur)
         alarms(app, cur, next, t)
         Widgets.updateAll(app)
@@ -206,6 +207,8 @@ object Reactor {
         val store = Store.get(app)
         val t = Logic.now()
         val (cur, next) = synchronized(store) { Logic.current(store, t) to Logic.nextSchedule(store, t) }
+        // Backstop for a liftoff whose alarm came late: you're kicked out within a minute regardless.
+        if (cur.phase == "burning") BlockerService.recheck()
         Notifier.ongoing(app, cur)
         if (Notifier.warningShown(app)) {
             if (next != null && Logic.warns(next, t)) Notifier.warning(app, next) else Notifier.cancelWarning(app)

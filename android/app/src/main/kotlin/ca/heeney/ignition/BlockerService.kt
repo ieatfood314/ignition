@@ -5,11 +5,14 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
 
 /**
@@ -25,12 +28,13 @@ class BlockerService : AccessibilityService() {
     private var lastKicked = ""
 
     override fun onServiceConnected() {
-        instanceConnected = true
+        instance = this
         refreshGames(true)
+        checkForeground()
     }
 
     override fun onDestroy() {
-        instanceConnected = false
+        if (instance === this) instance = null
         super.onDestroy()
     }
 
@@ -39,7 +43,30 @@ class BlockerService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val type = event.eventType
         if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
-        val pkg = event.packageName?.toString() ?: return
+        check(event.packageName?.toString() ?: return)
+    }
+
+    /**
+     * Checks the app that's in front now. Events only come when something on screen changes, so without
+     * this a burn that lifts off while you're already in a blocked app wouldn't kick you out until you
+     * touched something.
+     */
+    private fun checkForeground() {
+        check(foregroundPackage() ?: return)
+    }
+
+    private fun foregroundPackage(): String? {
+        val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        val front = apps.firstOrNull { it.isFocused } ?: apps.firstOrNull { it.isActive } ?: apps.maxByOrNull { it.layer }
+        val root = front?.root ?: return null
+        return try {
+            root.packageName?.toString()
+        } finally {
+            root.recycle()
+        }
+    }
+
+    private fun check(pkg: String) {
         if (pkg == PACKAGE || pkg == "com.android.systemui" || pkg.isEmpty()) return
 
         val store = Store.get(this)
@@ -145,7 +172,13 @@ class BlockerService : AccessibilityService() {
     companion object {
         const val PACKAGE = "ca.heeney.ignition"
 
-        @Volatile var instanceConnected = false
+        @Volatile private var instance: BlockerService? = null
+        private val main = Handler(Looper.getMainLooper())
+
+        /** Re-checks the foreground app, e.g. at liftoff; safe from any thread. */
+        fun recheck() {
+            main.post { instance?.checkForeground() }
+        }
 
         private val BROWSERS = setOf(
             "org.mozilla.firefox", "io.github.forkmaintainers.iceraven", "org.mozilla.fenix",
