@@ -123,9 +123,11 @@ sudo systemctl stop ignition-enforcer
 ## Android app
 
 - **The blocker** is an accessibility service (Settings → Phone → *App & site blocker*). It only reads the
-  foreground app and, in browsers, the address bar. Nothing is logged or leaves the phone. Browsers
-  covered: Firefox, Iceraven, Tor Browser and Chrome. **Every game** catches anything Android files as a
-  game, even in a hidden folder or the private space.
+  foreground app and, in browsers, the address bar. Nothing is logged or leaves the phone. Any app that
+  opens web links counts as a browser. Firefox and its forks, Chromium browsers (Chrome, Brave, Edge,
+  Vivaldi...), Samsung Internet, DuckDuckGo and Opera are read by their address bar's id; anything else
+  falls back to the first filled-in text field outside a list. **Every game** catches anything Android
+  files as a game, even in a hidden folder or the private space.
 - **Notifications:** an ongoing countdown while a T-minus or burn runs, with *Ignite now*, *Scrub* and
   *+15 min*. *Liftoff*, *main engine cutoff* and T-minus warnings show on the lock screen.
 - **Ring at liftoff** (optional): a scheduled T-minus can ring the phone and wake the lock screen, so you

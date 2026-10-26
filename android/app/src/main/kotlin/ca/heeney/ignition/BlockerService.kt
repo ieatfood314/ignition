@@ -3,8 +3,10 @@ package ca.heeney.ignition
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -18,17 +20,19 @@ import android.widget.Toast
 /**
  * Sends you back to the home screen when a blocked app comes to the foreground, or a blocked site shows
  * in a browser's address bar, while a burn is active. This is the phone's half of the lockout (the
- * enforcer does computers). It only looks at the foreground package name and, in a few known browsers,
- * the address-bar text; nothing is logged or sent anywhere.
+ * enforcer does computers). It only looks at the foreground package name and, in browsers, the
+ * address-bar text; nothing is logged or sent anywhere.
  */
 class BlockerService : AccessibilityService() {
     private var games: Set<String> = emptySet()
     private var gamesAt = 0L
+    private val browsers = HashMap<String, Boolean>()
     private var lastKick = 0L
     private var lastKicked = ""
 
     override fun onServiceConnected() {
         instance = this
+        browsers.clear()
         refreshGames(true)
         checkForeground()
     }
@@ -85,7 +89,7 @@ class BlockerService : AccessibilityService() {
             return
         }
         // A blocked site in a browser's address bar.
-        if (sites.isNotEmpty() && pkg in BROWSERS) {
+        if (sites.isNotEmpty() && isBrowser(pkg)) {
             val site = addressBarText(pkg)?.let { Blocking.blockedSiteIn(it, sites) } ?: return
             kick(site)
         }
@@ -101,6 +105,8 @@ class BlockerService : AccessibilityService() {
     }
 
     // ---- browser address bars
+
+    private fun isBrowser(pkg: String): Boolean = browsers.getOrPut(pkg) { opensWebLinks(this, pkg) }
 
     /**
      * The URL of the page the browser is showing, or null. Returns null while you're typing in the
@@ -124,7 +130,7 @@ class BlockerService : AccessibilityService() {
                     }
                 }
             }
-            // Fallback for toolbars we don't have an id for: an unfocused text field outside any list
+            // Fallback for browsers we don't have an id for: an unfocused text field outside any list
             // (suggestion rows and top-site tiles are list items).
             return scanForUrl(root)
         } finally {
@@ -180,15 +186,24 @@ class BlockerService : AccessibilityService() {
             main.post { instance?.checkForeground() }
         }
 
-        private val BROWSERS = setOf(
-            "org.mozilla.firefox", "io.github.forkmaintainers.iceraven", "org.mozilla.fenix",
-            "org.torproject.torbrowser", "com.android.chrome", "org.bromite.bromite", "com.brave.browser",
-        )
-        // Fenix/Firefox (view id + the Compose test tag it exposes as a resource id), then Chromium.
+        // Fenix/Firefox (view id + the Compose test tag it exposes as a resource id), Chromium (Chrome,
+        // Brave, Edge, Vivaldi...), Samsung Internet, DuckDuckGo, Opera. Anything else gets scanForUrl.
         private val URL_BAR_IDS = listOf(
             "mozac_browser_toolbar_url_view", "ADDRESSBAR_URL", "mozac_browser_toolbar_origin_view",
             "com.android.chrome:id/url_bar", "url_bar",
+            "location_bar_edit_text", "omnibarTextInput", "url_field",
         )
+
+        /**
+         * Whether [pkg] is a browser: it opens any web link. Apps that only open their own site's links
+         * (YouTube, Reddit) don't claim example.com, so they don't count.
+         */
+        fun opensWebLinks(context: Context, pkg: String): Boolean {
+            val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com"))
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+                .setPackage(pkg)
+            return context.packageManager.queryIntentActivities(probe, PackageManager.MATCH_ALL).isNotEmpty()
+        }
 
         /** Whether the accessibility service is both enabled in settings and connected. */
         fun enabled(context: Context): Boolean {
