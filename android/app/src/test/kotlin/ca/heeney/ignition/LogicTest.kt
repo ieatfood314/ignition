@@ -74,6 +74,42 @@ class LogicTest {
     }
 
     @Test
+    fun tminusSaysTheTimeLeft() {
+        val edge = 100_000L
+        assertEquals("T-10 min", Logic.tminus(edge, edge - 600))
+        assertEquals("T-10 min", Logic.tminus(edge, edge - 541)) // rounds up, like the widget
+        assertEquals("T-9 min", Logic.tminus(edge, edge - 540))
+        assertEquals("T-1 min", Logic.tminus(edge, edge - 1))
+        assertEquals("T-1 min", Logic.tminus(edge, edge)) // never T-0 before liftoff
+        assertEquals("T-1 h", Logic.tminus(edge, edge - 3600))
+        assertEquals("T-1 h 30 min", Logic.tminus(edge, edge - 5400))
+    }
+
+    @Test
+    fun ticksLandWhenTheMinuteChanges() {
+        val edge = 100_000L
+        assertEquals(edge - 540, Logic.nextMinute(edge, edge - 600))
+        assertEquals(edge - 600, Logic.nextMinute(edge, edge - 601))
+        assertEquals(edge - 60, Logic.nextMinute(edge, edge - 61))
+        assertNull(Logic.nextMinute(edge, edge - 60)) // the last minute ends at liftoff, which has its own alarm
+        assertNull(Logic.nextMinute(edge, edge + 5))
+        var t = edge - 300
+        val seen = mutableListOf(Logic.tminus(edge, t))
+        while (true) { t = Logic.nextMinute(edge, t) ?: break; seen += Logic.tminus(edge, t) }
+        assertEquals(listOf("T-5 min", "T-4 min", "T-3 min", "T-2 min", "T-1 min"), seen)
+    }
+
+    @Test
+    fun warnsOnlyInsideTheLeadTime() {
+        val next = JSONObject().put("at", 100_000L).put("lead", 5)
+        assertFalse(Logic.warns(next, 100_000L - 361))
+        assertTrue(Logic.warns(next, 100_000L - 300))
+        assertTrue(Logic.warns(next, 100_000L - 1))
+        assertFalse(Logic.warns(next, 100_000L))
+        assertFalse(Logic.warns(JSONObject(next.toString()).put("lead", 0), 100_000L - 30))
+    }
+
+    @Test
     fun cleanSettingsClampsAndDefaults() {
         val out = Logic.cleanSettings(
             JSONObject().put("goals", JSONObject().put("daily", -5).put("weekly", 999999))

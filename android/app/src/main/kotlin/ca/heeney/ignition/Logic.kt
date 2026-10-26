@@ -101,6 +101,12 @@ object Logic {
         return best
     }
 
+    /** Whether [next] is inside its T-minus warning, with a minute's grace for a late alarm. */
+    fun warns(next: JSONObject, t: Long): Boolean {
+        val left = next.optLong("at") - t
+        return next.optInt("lead") > 0 && left > 0 && left <= next.optInt("lead") * 60L + 60
+    }
+
     /** Write a tombstone for one occurrence of a schedule so neither the phone nor the server fires it. */
     fun skip(store: Store, schedId: String, date: String) {
         val uid = scheduleUid(schedId, date)
@@ -111,6 +117,18 @@ object Logic {
             store.putSession(newSession(uid, 1, now(), "schedule").put("deleted", true))
         }
     }
+
+    // ---- countdowns
+
+    /** "T-12 min" until [edge], rounded up so it never reads T-0 before liftoff. */
+    fun tminus(edge: Long, t: Long): String {
+        val mins = ((edge - t + 59) / 60).coerceAtLeast(1)
+        if (mins < 60) return "T-$mins min"
+        return if (mins % 60 == 0L) "T-${mins / 60} h" else "T-${mins / 60} h ${mins % 60} min"
+    }
+
+    /** When [tminus] for [edge] next changes, or null if the next change is [edge] itself. */
+    fun nextMinute(edge: Long, t: Long): Long? = (edge - (edge - t - 1) / 60 * 60).takeIf { it < edge }
 
     // ---- stats
 

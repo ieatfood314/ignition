@@ -96,7 +96,7 @@ object Notifier {
             .setContentIntent(openApp(context, "ignite", 10))
         if (cur.phase == "countdown") {
             b.setWhen(s.optLong("starts_at") * 1000)
-                .setContentTitle("T-minus · ignition at ${clock(context, s.optLong("starts_at"))}")
+                .setContentTitle("${Logic.tminus(s.optLong("starts_at"), Logic.now())} · ignition at ${clock(context, s.optLong("starts_at"))}")
                 .setContentText("${s.optInt("minutes")} min burn. Enjoy the break.")
                 .addAction(Notification.Action.Builder(null, "Ignite now", action(context, ACTION_NOW, 11)).build())
                 .addAction(Notification.Action.Builder(null, "Scrub", action(context, ACTION_SCRUB, 12)).build())
@@ -121,17 +121,18 @@ object Notifier {
         )
     }
 
+    /** Posts the warning, or re-posts it silently with the time left updated. */
     fun warning(context: Context, next: JSONObject) {
         channels(context)
         val at = next.optLong("at")
-        val mins = ((at - Logic.now() + 59) / 60).coerceAtLeast(1)
         context.getSystemService(NotificationManager::class.java).notify(
             ID_WARN,
             builder(context, CH_ALERTS)
-                .setContentTitle("T-minus $mins")
+                .setContentTitle(Logic.tminus(at, Logic.now()))
                 .setContentText("Scheduled ignition at ${clock(context, at)} · ${next.optInt("minutes")} min burn")
                 .setWhen(at * 1000).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
                 .setTimeoutAfter((at - Logic.now() + 5) * 1000)
+                .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
                 .setContentIntent(openApp(context, "ignite", 30))
                 .addAction(
@@ -144,6 +145,8 @@ object Notifier {
                 ).build(),
         )
     }
+
+    fun warningShown(context: Context) = context.getSystemService(NotificationManager::class.java).activeNotifications.any { it.id == ID_WARN }
 
     fun cancelWarning(context: Context) = context.getSystemService(NotificationManager::class.java).cancel(ID_WARN)
 

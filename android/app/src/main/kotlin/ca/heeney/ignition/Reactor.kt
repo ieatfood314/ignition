@@ -137,7 +137,6 @@ object Reactor {
         val edge = pending(app, ACTION_EDGE, 1)
         val fire = pending(app, ACTION_FIRE, 2)
         val warn = pending(app, ACTION_WARN, 3)
-        val tick = pending(app, ACTION_TICK, 4)
 
         val s = cur.session
         when (cur.phase) {
@@ -154,15 +153,10 @@ object Reactor {
             am.cancel(fire)
             am.cancel(warn)
         }
-        // Minute ticks keep widgets current while something is happening; non-wakeup so they cost nothing asleep.
-        if (cur.phase != "idle") {
-            am.setRepeating(AlarmManager.RTC, System.currentTimeMillis() + 60_000, 60_000, tick)
-        } else {
-            am.cancel(tick)
-        }
+        armTick(app, cur, next, t)
 
         // Launch window: when it's open and nothing is running, poll every few minutes to catch "home long
-        // enough"; otherwise wake once when it next opens. tick() does the actual nudging.
+        // enough"; otherwise wake once when it next opens. LaunchWindow.tick() does the actual nudging.
         val window = pending(app, ACTION_WINDOW, 5)
         val store = Store.get(app)
         val cfg = synchronized(store) { LaunchWindow.config(store) }
@@ -187,12 +181,47 @@ object Reactor {
         }
     }
 
+    /**
+     * Minute ticks keep the time left in notifications and widgets current while something counts down.
+     * They land as the minute changes, so "T-12 min" turns into "T-11 min" on time; non-wakeup, so they
+     * cost nothing asleep and catch up as soon as the screen comes on.
+     */
+    private fun armTick(app: Context, cur: Logic.Current, next: JSONObject?, t: Long) {
+        val am = app.getSystemService(AlarmManager::class.java)
+        val tick = pending(app, ACTION_TICK, 4)
+        val edges = listOfNotNull(
+            cur.session?.optLong(if (cur.phase == "countdown") "starts_at" else "ends_at"),
+            next?.takeIf { Logic.warns(it, t) }?.optLong("at"),
+        )
+        val at = edges.mapNotNull { Logic.nextMinute(it, t) }.minOrNull()
+        when {
+            at == null -> am.cancel(tick)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms() -> am.set(AlarmManager.RTC, at * 1000, tick)
+            else -> am.setExact(AlarmManager.RTC, at * 1000, tick)
+        }
+    }
+
+    @Synchronized
+    fun tick(app: Context) {
+        val store = Store.get(app)
+        val t = Logic.now()
+        val (cur, next) = synchronized(store) { Logic.current(store, t) to Logic.nextSchedule(store, t) }
+        Notifier.ongoing(app, cur)
+        if (Notifier.warningShown(app)) {
+            if (next != null && Logic.warns(next, t)) Notifier.warning(app, next) else Notifier.cancelWarning(app)
+        }
+        Widgets.updateAll(app)
+        armTick(app, cur, next, t)
+    }
+
     /** The T-minus warning before a scheduled launch window. */
+    @Synchronized
     fun warn(app: Context) {
         val store = Store.get(app)
-        val next = synchronized(store) { Logic.nextSchedule(store) } ?: return
-        val left = next.optLong("at") - Logic.now()
-        if (left <= 0 || left > next.optInt("lead") * 60L + 60) return
+        val t = Logic.now()
+        val (cur, next) = synchronized(store) { Logic.current(store, t) to Logic.nextSchedule(store, t) }
+        if (next == null || !Logic.warns(next, t)) return
         Notifier.warning(app, next)
+        armTick(app, cur, next, t)
     }
 }

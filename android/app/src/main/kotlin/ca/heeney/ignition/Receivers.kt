@@ -11,7 +11,7 @@ class EventReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         val api = LocalApi(app)
         val error = when (intent.action) {
-            Reactor.ACTION_TICK -> { Widgets.updateAll(app); null }
+            Reactor.ACTION_TICK -> { Reactor.tick(app); null }
             Reactor.ACTION_WARN -> { Reactor.warn(app); null }
             Reactor.ACTION_WINDOW -> { LaunchWindow.tick(app); Reactor.update(app); null }
             Notifier.ACTION_NOW -> api.command("now")
