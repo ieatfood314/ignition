@@ -149,3 +149,8 @@ curl -fsSL https://raw.githubusercontent.com/ieatfood314/ignition/main/uninstall
 **Where's the technical stuff?** [docs/advanced.md](docs/advanced.md) covers extra blocker options (closing
 ports for self-hosted services, T3 Code, RGB lighting), Tasker, the API, how the blocking works, and
 building the app yourself.
+
+## Credits
+
+The liftoff sound is NASA's SLS test fire, from [NASA's sound library](https://www.nasa.gov/historical-sounds/).
+Courtesy NASA.
