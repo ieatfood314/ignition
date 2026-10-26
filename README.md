@@ -22,7 +22,7 @@ sounds like too much, it probably isn't the app for you.
 | A Linux computer | [Paste one command](#on-a-linux-computer) |
 | Both | Do both, then [connect them](#phone-and-computers-together) |
 
-Works on Android 10 or newer and on Linux. There's no iPhone, Windows or Mac version.
+Works on Android 10 or newer and on Linux. There's no iPhone, Windows or Mac version (yet).
 
 ### On your Android phone
 
