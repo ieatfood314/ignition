@@ -970,6 +970,8 @@ async function loadAppInfo() {
     $("#blocker-hint").hidden = !!bl.enabled;
     $("#blocker-hint").textContent = "The blocker is off on this phone, so apps and sites won't be blocked here. Turn it on in Settings › Phone.";
     $("#ring-toggle").checked = !!appInfo.ring.enabled;
+    $("#ring-sound-row").hidden = !appInfo.ring.enabled;
+    $$("#ring-sound [data-sound]").forEach((b) => b.classList.toggle("on", b.dataset.sound === appInfo.ring.sound));
     $("#ring-hint").textContent = appInfo.ring.enabled && !appInfo.ring.full_screen ? "Full-screen alerts are off for Ignition, so it can only ring, not light up the lock screen." : "";
     paintHome();
     paintSummaries();
@@ -1033,6 +1035,11 @@ $("#ring-toggle").onchange = async (e) => {
   try { appInfo = await api("PUT", "/native/app", { ring_enabled: e.target.checked }); } catch (err) { toast(err.message); }
   loadAppInfo();
 };
+$$("#ring-sound [data-sound]").forEach((b) => b.onclick = async () => {
+  try { appInfo = await api("PUT", "/native/app", { ring_sound: b.dataset.sound }); } catch (err) { toast(err.message); }
+  loadAppInfo();
+});
+$("#ring-test").onclick = async () => { try { await api("POST", "/native/app/ring-test"); } catch (e) { toast(e.message); } };
 $("#blocker-btn").onclick = async () => { try { appInfo = await api("POST", "/native/app/blocker"); } catch (e) { toast(e.message); } loadAppInfo(); };
 $("#notif-btn").onclick = async () => { try { await api("POST", "/native/app/notifications"); } catch (e) { toast(e.message); } };
 

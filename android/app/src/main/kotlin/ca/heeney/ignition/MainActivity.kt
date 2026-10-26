@@ -160,7 +160,11 @@ class MainActivity : Activity() {
                 .put("dnd", JSONObject().put("enabled", p.getBoolean("dnd_enabled", false)).put("granted", Reactor.dndGranted(this)))
                 .put("notifications", JSONObject().put("granted", notificationsGranted()))
                 .put("blocker", JSONObject().put("enabled", BlockerService.enabled(this)))
-                .put("ring", JSONObject().put("enabled", p.getBoolean("ring_enabled", false)).put("full_screen", canFullScreen()))
+                .put(
+                    "ring",
+                    JSONObject().put("enabled", p.getBoolean("ring_enabled", false)).put("full_screen", canFullScreen())
+                        .put("sound", RingActivity.sound(this)),
+                )
                 .put(
                     "launch_window",
                     JSONObject().put("home", LaunchWindow.homeGateway(this) ?: JSONObject.NULL)
@@ -216,9 +220,16 @@ class MainActivity : Activity() {
                         )
                     }
                 }
+                if (body.optString("ring_sound") in RingActivity.SOUNDS) {
+                    Reactor.prefs(this).edit().putString("ring_sound", body.optString("ring_sound")).apply()
+                }
                 if (body.optString("home_wifi") == "current" && !LaunchWindow.setHomeToCurrent(this)) {
                     throw ApiError(400, "Not on Wi-Fi right now, or no gateway found.")
                 }
+                appInfo()
+            }
+            path == "/native/app/ring-test" && method == "POST" -> {
+                startActivity(Intent(this, RingActivity::class.java))
                 appInfo()
             }
             path == "/native/app/blocker" && method == "POST" -> {

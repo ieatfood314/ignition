@@ -129,7 +129,9 @@ sudo systemctl stop ignition-enforcer
 - **Notifications:** an ongoing countdown while a T-minus or burn runs, with *Ignite now*, *Scrub* and
   *+15 min*. *Liftoff*, *main engine cutoff* and T-minus warnings show on the lock screen.
 - **Ring at liftoff** (optional): a scheduled T-minus can ring the phone and wake the lock screen, so you
-  can't sleep through the start of a session.
+  can't sleep through the start of a session. It buzzes and plays a rocket launch by default; pick *Buzz*
+  for vibration only or *Ringtone* for your phone's ringtone. *Test* plays it. The sound is synthesized by
+  `android/sounds/liftoff.py`.
 - **Do Not Disturb while burning** (optional). Switched back afterwards, but only if you haven't touched it
   yourself.
 - **Launch window:** a nudge, not a lock. Pick a daily stretch (say weekday afternoons). If you've been home
