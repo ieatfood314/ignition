@@ -86,7 +86,15 @@ sudo enforcer/install.sh --server-url http://nas:8445 --block topgrade,lutris --
 ```
 
 The `openrgb-ram` hook recolours RGB RAM to ignition's accent during a burn and puts it back afterwards,
-through OpenRGB. Set `IGNITION_RGB_DEVICES` to pick the devices by name.
+through OpenRGB. It runs OpenRGB with its own config (`/etc/ignition/openrgb-ram-only`) that detects RAM
+and nothing else, so keyboards, fans and the rest are never touched. Set `IGNITION_RGB_DEVICES` to pick the
+devices by name, and `IGNITION_IDLE_COLOR` (e.g. `ffffff`) for RAM that doesn't read back its own colour
+(HyperX Fury does not, and would otherwise be restored dark):
+
+```sh
+  --hook-burn 'IGNITION_COLOR=ff0000 /usr/local/lib/ignition/openrgb-ram burn' \
+  --hook-idle 'IGNITION_IDLE_COLOR=ffffff /usr/local/lib/ignition/openrgb-ram idle'
+```
 
 ### How the lockout works on computers
 
@@ -100,7 +108,9 @@ replies with the current session and the shared block list. The Ignite page show
 - kills **blocked programs** and their children on sight;
 - closes any **`--block-ports`** to everyone, local and remote, including published container ports;
 - refuses loopback TCP to the **T3 ports** from every process outside the T3 server's own cgroups, so agents
-  keep running but you can't open a client, and kills connections already open (`ss -K`);
+  keep running but you can't open a client, and kills connections already open (`ss -K`). It also stops
+  those cgroups reaching Cloudflare's tunnel port (7844; `t3.egress_ports` in the config), since T3
+  Connect's `cloudflared` runs inside the server's cgroup and would otherwise let remote clients in;
 - runs the **burn/idle hooks**.
 
 The session and block list are cached in `/var/lib/ignition/state.json`, so blocks hold until the end time

@@ -6,6 +6,9 @@ shared block list. While a session is active it:
   * cuts off T3 Code clients: an nftables table rejects loopback TCP to the T3 ports from every
     process outside the T3 server's own cgroups (so running threads keep going, but Tailscale Serve,
     SSH tunnels and local desktop apps can't reach it), and existing client connections are killed;
+  * blocks the T3 server's cgroups from reaching Cloudflare's tunnel port (t3.egress_ports, default
+    7844): T3 Connect's cloudflared runs inside the server's cgroup, so it would otherwise pass the rule
+    above and carry remote clients straight in;
   * cuts off other local services completely (block_ports), e.g. a self-hosted video server;
   * points blocked sites at 0.0.0.0 in /etc/hosts;
   * kills blocked programs (e.g. topgrade, lutris), and anything they spawned, if started after the
@@ -151,6 +154,15 @@ class Enforcer:
             # prerouting rule runs before Docker's DNAT, so published container ports are covered too.
             closed = ", ".join(str(p) for p in self.block_ports)
             rules.append(f'oifname "lo" tcp dport {{ {closed} }} reject with tcp reset')
+        egress = self.t3.get("egress_ports", [7844]) if self.t3.get("ports") else []
+        if egress:
+            # Allowed cgroups include whatever the T3 server spawns, e.g. T3 Connect's cloudflared tunnel.
+            # Cut the tunnel off at its edge instead of letting it into the port.
+            out = ", ".join(str(p) for p in egress)
+            rules += [
+                f'socket cgroupv2 level {p.count("/") + 1} "{p}" meta l4proto {{ tcp, udp }} th dport {{ {out} }} reject'
+                for p in self.allowed_cgroups()
+            ]
         if self.t3.get("ports"):
             ports = ", ".join(str(p) for p in self.t3["ports"])
             rules += [

@@ -4,19 +4,27 @@
 Used as an ignition enforcer hook (hooks.burn / hooks.idle). The enforcer runs it as root with
 $IGNITION_COLOR set to ignition's accent (e.g. e23a29).
 
-  openrgb-ram burn   # save the current lighting once, then set every DRAM device to $IGNITION_COLOR
-  openrgb-ram idle   # load the saved profile back
+  openrgb-ram burn   # set every DRAM device to static $IGNITION_COLOR
+  openrgb-ram idle   # put them back: static $IGNITION_IDLE_COLOR if set, else the profile saved at burn
 
-The first burn saves the pristine lighting to an OpenRGB profile; a marker file keeps a restart
-mid-burn from overwriting it with the already-reddened state. "idle" restores and clears the marker.
-Only DRAM devices are touched, so keyboards/fans/etc. keep whatever they were doing.
+Only RAM is ever opened. OpenRGB runs with its own config (CONFIG_DIR) that turns off every detector
+without "DRAM" in its name: a full detection takes over other devices too, and Razer keyboards, for one,
+go dark when it does, whatever they were set to.
+
+Some RAM (HyperX Fury, for one) reads back as black, so a saved profile restores it dark. For those, set
+IGNITION_IDLE_COLOR to the colour it normally is. A marker file (MARKER) exists for as long as the RAM is
+recoloured, so other scripts that keep the RAM a colour can stand aside or follow the burn; it also stops
+a restart mid-burn from saving the already-recoloured state as the profile.
 """
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 
+CONFIG_DIR = "/etc/ignition/openrgb-ram-only"
 PROFILE = "ignition-restore"
 MARKER = "/run/ignition/rgb-saved"
 DEFAULT_COLOR = "e23a29"
@@ -30,12 +38,38 @@ def openrgb():
 
 
 def run(*args):
-    return subprocess.run([openrgb(), *args], capture_output=True, text=True, timeout=45)
+    return subprocess.run([openrgb(), "--config", CONFIG_DIR, "--noautoconnect", *args],
+                          capture_output=True, text=True, timeout=45)
 
 
-# Product-name tokens for RGB RAM, since older OpenRGB `--list-devices` prints no device type.
-DRAM_NAMES = ("dram", "fury", "vengeance", "trident", "ballistix", "dominator", "ripjaws",
-              "spectrix", "hyperx", "xpg", "aegis", "predator ram", "viper steel")
+def ram_only_config():
+    """Keep CONFIG_DIR's detectors down to the DRAM ones. Re-checked every run, because OpenRGB adds
+    detectors it doesn't know yet (after an upgrade) as enabled."""
+    path = os.path.join(CONFIG_DIR, "OpenRGB.json")
+    cfg = None
+    for src in (path, os.path.expanduser("~/.config/OpenRGB/OpenRGB.json")):
+        try:
+            with open(src) as f:
+                cfg = json.load(f)
+            break
+        except (OSError, ValueError):
+            pass
+    if cfg is None:
+        # No detector list to start from: let OpenRGB write one. This first run detects everything once.
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        run("--list-devices")
+        with open(path) as f:
+            cfg = json.load(f)
+    detectors = cfg.setdefault("Detectors", {}).setdefault("detectors", {})
+    want = {name: "DRAM" in name for name in detectors}
+    if want != detectors or not os.path.exists(path):
+        detectors.update(want)
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=4)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
 
 
 def devices():
@@ -48,52 +82,67 @@ def devices():
     return out
 
 
-def dram_indices():
-    """Which devices to recolour. $IGNITION_RGB_DEVICES (comma-separated indices or name substrings)
-    pins it exactly; otherwise anything whose type or name looks like RAM."""
+def targets():
+    """Which devices to recolour: everything detected (it's all RAM), or just those matching
+    $IGNITION_RGB_DEVICES (comma-separated indices or name substrings)."""
     devs = devices()
     override = os.environ.get("IGNITION_RGB_DEVICES", "").strip()
-    if override:
-        picks = []
-        for tok in (t.strip() for t in override.split(",") if t.strip()):
-            if tok.isdigit():
-                picks += [i for i, _ in devs if i == int(tok)]
-            else:
-                picks += [i for i, n in devs if tok.lower() in n.lower()]
-        return sorted(set(picks))
-    # Newer OpenRGB prints "Type: DRAM"; fall back to known RAM product names.
-    typed = []
-    cur = None
-    for line in run("--list-devices").stdout.splitlines():
-        m = re.match(r"^(\d+):\s", line)
-        if m:
-            cur = int(m.group(1))
-        elif cur is not None and "Type:" in line and "DRAM" in line:
-            typed.append(cur)
-    if typed:
-        return typed
-    return [i for i, n in devs if any(tok in n.lower() for tok in DRAM_NAMES)]
+    if not override:
+        return [i for i, _ in devs]
+    picks = []
+    for tok in (t.strip() for t in override.split(",") if t.strip()):
+        if tok.isdigit():
+            picks += [i for i, _ in devs if i == int(tok)]
+        else:
+            picks += [i for i, n in devs if tok.lower() in n.lower()]
+    return sorted(set(picks))
 
 
-def burn():
-    color = re.sub(r"[^0-9a-fA-F]", "", os.environ.get("IGNITION_COLOR") or DEFAULT_COLOR)[:6] or DEFAULT_COLOR
-    if not os.path.exists(MARKER):
-        os.makedirs(os.path.dirname(MARKER), exist_ok=True)
-        run("--save-profile", PROFILE)
-        open(MARKER, "w").close()
-    targets = dram_indices()
-    if not targets:
-        sys.exit("no DRAM devices found")
-    for i in targets:
-        r = run("--device", str(i), "--mode", "static", "--color", color)
+def find_targets():
+    # Detection comes up empty while another OpenRGB holds the SMBus (e.g. a script that keeps the RAM
+    # a colour), so give it a few tries.
+    for _ in range(6):
+        found = targets()
+        if found:
+            return found
+        time.sleep(5)
+    sys.exit("no DRAM devices found")
+
+
+def color(var, default=None):
+    c = re.sub(r"[^0-9a-fA-F]", "", os.environ.get(var) or "")[:6]
+    return c or default
+
+
+def paint(c):
+    for i in find_targets():
+        r = run("--device", str(i), "--mode", "static", "--color", c)
         if r.returncode:
             sys.exit(f"openrgb device {i}: {(r.stderr or r.stdout).strip()}")
 
 
+def burn():
+    ram_only_config()
+    if not os.path.exists(MARKER):
+        if not color("IGNITION_IDLE_COLOR"):
+            find_targets()
+            run("--save-profile", PROFILE)
+        os.makedirs(os.path.dirname(MARKER), exist_ok=True)
+        open(MARKER, "w").close()
+    paint(color("IGNITION_COLOR", DEFAULT_COLOR))
+
+
 def idle():
-    if os.path.exists(MARKER):
-        run("--profile", PROFILE)
+    ram_only_config()
+    # Clear the marker first, so anything that keeps the RAM a colour takes over even if this fails.
+    saved = os.path.exists(MARKER)
+    if saved:
         os.remove(MARKER)
+    idle_color = color("IGNITION_IDLE_COLOR")
+    if idle_color:
+        paint(idle_color)
+    elif saved:
+        run("--profile", PROFILE)
 
 
 if __name__ == "__main__":
