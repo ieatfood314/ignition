@@ -2,16 +2,16 @@ import QtQuick
 import org.kde.kirigami as Kirigami
 import "Style.js" as Style
 
-// An outlined, all-caps mono button. With holdMs set it only fires after being held that long, filling up
-// while it's held (for ending a long burn early).
+// An outlined, all-caps mono button in the theme's text colour, or another `ink` such as the accent. With
+// holdMs set it only fires after being held that long, filling up while it's held (for ending a long burn
+// early).
 MouseArea {
     id: pill
 
     property string text
-    property bool accent: false
     property int holdMs: 0
     property real fontSize: Kirigami.Units.gridUnit * 0.55
-    readonly property color ink: accent ? Style.red : Kirigami.Theme.textColor
+    property color ink: Kirigami.Theme.textColor
     property real progress: 0
 
     signal activated()
@@ -58,7 +58,7 @@ MouseArea {
         height: parent.height
         width: Math.max(height, parent.width * pill.progress)
         radius: height / 2
-        color: Style.alpha(Style.red, 0.35)
+        color: Style.alpha(pill.ink, 0.35)
     }
     Text {
         id: label

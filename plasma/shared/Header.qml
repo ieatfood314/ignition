@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import "Style.js" as Style
 
-// The red dot and dot-matrix title every widget starts with, plus a note on the right. The dot pulses
+// The accent dot and dot-matrix title every widget starts with, plus a note on the right. The dot pulses
 // while `live`, and the note reads NO SIGNAL when the server can't be reached.
 RowLayout {
     id: header
@@ -12,6 +12,7 @@ RowLayout {
     property string note
     property bool online: true
     property bool live: false
+    property color accent: Style.red
     property real size: Kirigami.Units.gridUnit * 0.75
 
     spacing: size * 0.6
@@ -22,7 +23,7 @@ RowLayout {
         implicitWidth: header.size * 0.45
         implicitHeight: implicitWidth
         radius: width / 2
-        color: header.online ? Style.red : Style.alpha(Kirigami.Theme.textColor, Style.dim)
+        color: header.online ? header.accent : Style.alpha(Kirigami.Theme.textColor, Style.dim)
         opacity: 1
 
         SequentialAnimation on opacity {

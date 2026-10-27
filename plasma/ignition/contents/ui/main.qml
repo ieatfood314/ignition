@@ -1,6 +1,7 @@
 import QtQuick
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
+import org.kde.kirigami as Kirigami
 import "Style.js" as Style
 import "Fmt.js" as Fmt
 
@@ -10,6 +11,7 @@ PlasmoidItem {
     id: root
 
     readonly property alias client: client
+    readonly property color accent: Style.accent(Plasmoid.configuration, Kirigami.Theme.focusColor)
     readonly property bool inPanel: Plasmoid.formFactor === PlasmaCore.Types.Vertical
         || Plasmoid.formFactor === PlasmaCore.Types.Horizontal
 

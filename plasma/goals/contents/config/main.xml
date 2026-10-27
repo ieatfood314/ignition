@@ -7,5 +7,12 @@
     <entry name="serverUrl" type="String">
       <default>@SERVER_URL@</default>
     </entry>
+    <!-- red: Nothing's red; system: the accent colour in System Settings; custom: accentColor. -->
+    <entry name="accent" type="String">
+      <default>red</default>
+    </entry>
+    <entry name="accentColor" type="Color">
+      <default>#D71921</default>
+    </entry>
   </group>
 </kcfg>

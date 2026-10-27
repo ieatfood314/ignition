@@ -7,10 +7,11 @@ import "Style.js" as Style
 import "Fmt.js" as Fmt
 
 // Time burned today and this week against the goals in Settings, and the last seven days as dot columns.
-// A goal you've hit turns red.
+// A goal you've hit turns the accent colour.
 PlasmoidItem {
     id: root
 
+    readonly property color accent: Style.accent(Plasmoid.configuration, Kirigami.Theme.focusColor)
     readonly property var st: client.stats
     readonly property int daily: st && st.goals ? st.goals.daily : 0
     readonly property int weekly: st && st.goals ? st.goals.weekly : 0
@@ -47,13 +48,13 @@ PlasmoidItem {
             count: 24
             dotSize: Math.max(2, width / 13)
             fraction: root.st && root.daily ? root.st.today / (root.daily * 60) : 0
-            litColor: compact.met ? Style.red : Kirigami.Theme.textColor
+            litColor: compact.met ? root.accent : Kirigami.Theme.textColor
         }
         Text {
             anchors.centerIn: parent
             readonly property int mins: root.st ? Math.floor(root.st.today / 60) : 0
             text: !root.st ? "–" : mins < 100 ? mins : Math.floor(mins / 60) + "H"
-            color: compact.met ? Style.red : Kirigami.Theme.textColor
+            color: compact.met ? root.accent : Kirigami.Theme.textColor
             font.family: Style.dot
             font.pixelSize: compact.side * (text.length > 2 ? 0.27 : 0.36)
         }
@@ -80,6 +81,7 @@ PlasmoidItem {
             Header {
                 Layout.fillWidth: true
                 title: "BURN GOALS"
+                accent: root.accent
                 size: 13 * full.u
                 online: client.online
                 note: root.daily || root.weekly ? "" : "SET GOALS ›"
@@ -112,7 +114,7 @@ PlasmoidItem {
                         Item { Layout.fillWidth: true }
                         Text {
                             text: Fmt.duration(goal.modelData.sec) + (goal.modelData.goal ? "/" + Fmt.estimate(goal.modelData.goal) : "")
-                            color: goal.met ? Style.red : full.ink
+                            color: goal.met ? root.accent : full.ink
                             font.family: Style.dot
                             font.pixelSize: 15 * full.u
                         }
@@ -123,7 +125,7 @@ PlasmoidItem {
                         rows: 2
                         dotSize: 3.2 * full.u
                         fraction: goal.modelData.goal ? goal.modelData.sec / (goal.modelData.goal * 60) : 0
-                        litColor: goal.met ? Style.red : full.ink
+                        litColor: goal.met ? root.accent : full.ink
                     }
                 }
             }
@@ -167,7 +169,7 @@ PlasmoidItem {
                                         width: 4 * full.u
                                         height: width
                                         radius: width / 2
-                                        color: !on ? Style.alpha(full.ink, Style.dim) : day.met ? Style.red : full.ink
+                                        color: !on ? Style.alpha(full.ink, Style.dim) : day.met ? root.accent : full.ink
                                     }
                                 }
                             }

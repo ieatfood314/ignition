@@ -10,6 +10,7 @@ import "Fmt.js" as Fmt
 PlasmoidItem {
     id: root
 
+    readonly property color accent: Style.accent(Plasmoid.configuration, Kirigami.Theme.focusColor)
     readonly property var open: Fmt.upNext(client.items)
     readonly property bool hot: open.some((i) => i.due && Fmt.due(i.due).hot)
     readonly property bool inPanel: Plasmoid.formFactor === PlasmaCore.Types.Vertical
@@ -30,7 +31,7 @@ PlasmoidItem {
         eager: root.expanded
     }
 
-    // In a panel: how many things are left, with the red dot when something's due.
+    // In a panel: how many things are left, with the accent dot when something's due.
     compactRepresentation: MouseArea {
         id: compact
         readonly property real side: Math.min(width, height)
@@ -53,7 +54,7 @@ PlasmoidItem {
             width: compact.side * 0.16
             height: width
             radius: width / 2
-            color: Style.red
+            color: root.accent
         }
     }
 
@@ -82,6 +83,7 @@ PlasmoidItem {
             Header {
                 Layout.fillWidth: true
                 title: "NEXT UP"
+                accent: root.accent
                 size: 13 * full.u
                 online: client.online
                 note: root.open.length > full.fits ? `+${root.open.length - full.fits}` : ""
@@ -129,7 +131,7 @@ PlasmoidItem {
                                 NumberAnimation { duration: 300 }
                             }
 
-                            // The check: a hollow dot that fills red, then the item leaves the list.
+                            // The check: a hollow dot that fills with the accent, then the item leaves the list.
                             MouseArea {
                                 id: check
                                 x: 0
@@ -155,9 +157,9 @@ PlasmoidItem {
                                     width: 11 * full.u
                                     height: width
                                     radius: width / 2
-                                    color: row.gone ? Style.red : check.containsMouse ? Style.alpha(Style.red, 0.35) : "transparent"
+                                    color: row.gone ? root.accent : check.containsMouse ? Style.alpha(root.accent, 0.35) : "transparent"
                                     border.width: Math.max(1, 1.2 * full.u)
-                                    border.color: row.gone || check.containsMouse ? Style.red : full.muted
+                                    border.color: row.gone || check.containsMouse ? root.accent : full.muted
                                 }
                             }
 
@@ -177,7 +179,7 @@ PlasmoidItem {
                                 }
                                 Row {
                                     spacing: 8 * full.u
-                                    // Priority as one to three red ticks.
+                                    // Priority as one to three accent ticks.
                                     Row {
                                         visible: row.modelData.priority > 0
                                         anchors.verticalCenter: parent.verticalCenter
@@ -188,7 +190,7 @@ PlasmoidItem {
                                                 required property int index
                                                 width: 1.8 * full.u
                                                 height: 7 * full.u
-                                                color: index < row.modelData.priority ? Style.red : Style.alpha(full.ink, Style.dim)
+                                                color: index < row.modelData.priority ? root.accent : Style.alpha(full.ink, Style.dim)
                                             }
                                         }
                                     }
@@ -202,7 +204,7 @@ PlasmoidItem {
                                     Text {
                                         visible: !!row.due
                                         text: row.due ? row.due.text : ""
-                                        color: row.due && row.due.hot ? Style.red : full.muted
+                                        color: row.due && row.due.hot ? root.accent : full.muted
                                         font.family: Style.mono
                                         font.pixelSize: 8.5 * full.u
                                     }
@@ -239,7 +241,7 @@ PlasmoidItem {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         color: full.ink
-                        selectionColor: Style.red
+                        selectionColor: root.accent
                         font.family: Style.mono
                         font.pixelSize: 11 * full.u
                         clip: true

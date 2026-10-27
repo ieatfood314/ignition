@@ -36,6 +36,7 @@ Item {
         Header {
             Layout.fillWidth: true
             title: "IGNITION"
+            accent: full.app.accent
             size: 13 * full.u
             online: full.client.online
             live: full.phase === "burning"
@@ -64,8 +65,8 @@ Item {
                 count: 60
                 dotSize: Math.max(2, width / 50)
                 fraction: full.app.arming ? (4 - full.app.arming) / 3 : full.phase === "idle" ? 0 : full.app.fraction
-                litColor: full.app.arming ? Style.red : full.phase === "countdown" ? full.muted : full.ink
-                emberColor: Style.red
+                litColor: full.app.arming ? full.app.accent : full.phase === "countdown" ? full.muted : full.ink
+                emberColor: full.app.accent
             }
 
             ColumnLayout {
@@ -77,7 +78,7 @@ Item {
                     Layout.preferredHeight: ring.width * 0.2
                     Layout.preferredWidth: ring.width * 0.2
                     visible: full.idle
-                    color: full.client.online ? Style.red : full.muted
+                    color: full.client.online ? full.app.accent : full.muted
                 }
                 Text {
                     Layout.alignment: Qt.AlignHCenter
@@ -85,7 +86,7 @@ Item {
                         : full.phase === "burning" ? Fmt.clock(full.app.remaining)
                         : full.phase === "countdown" ? "T-" + Fmt.clock(full.app.remaining)
                         : "IGNITE"
-                    color: full.app.arming ? Style.red : full.ink
+                    color: full.app.arming ? full.app.accent : full.ink
                     font.family: full.idle ? Style.dotCaps : Style.dot
                     font.pixelSize: ring.width * (full.idle ? 0.13 : full.app.arming ? 0.3 : text.length > 6 ? 0.15 : 0.2)
                 }
@@ -152,7 +153,7 @@ Item {
                 }
                 Pill {
                     text: "Ignite now"
-                    accent: true
+                    ink: full.app.accent
                     fontSize: 9 * full.u
                     onActivated: full.client.act("/api/ignite/now")
                 }
@@ -174,7 +175,7 @@ Item {
                 Pill {
                     visible: !!full.ig.can_stop
                     text: "Hold to end"
-                    accent: true
+                    ink: full.app.accent
                     holdMs: 2000
                     fontSize: 9 * full.u
                     onActivated: full.client.act("/api/ignite/stop")
@@ -199,7 +200,7 @@ Item {
                         + Fmt.estimate(full.session.minutes) + " BURN AT " + Fmt.time(full.session.starts_at)
                     : ns ? "LAUNCH " + Fmt.when(ns.at) + " · " + Fmt.estimate(ns.minutes)
                     : ""
-                color: full.app.message ? Style.red : full.muted
+                color: full.app.message ? full.app.accent : full.muted
                 font.family: Style.mono
                 font.pixelSize: 9 * full.u
                 font.letterSpacing: 0.5 * full.u
@@ -236,7 +237,7 @@ Item {
                 Text {
                     text: !today.st ? "" : today.goal ? Fmt.duration(today.st.today) + "/" + Fmt.estimate(today.goal)
                         : Fmt.duration(today.st.today) + "  ·  WEEK " + Fmt.duration(today.st.week)
-                    color: today.met ? Style.red : full.ink
+                    color: today.met ? full.app.accent : full.ink
                     font.family: Style.dot
                     font.pixelSize: 12 * full.u
                 }
@@ -247,7 +248,7 @@ Item {
                 rows: 2
                 dotSize: 3 * full.u
                 fraction: today.goal ? today.st.today / (today.goal * 60) : 0
-                litColor: today.met ? Style.red : full.ink
+                litColor: today.met ? full.app.accent : full.ink
             }
         }
 
@@ -269,7 +270,7 @@ Item {
                         width: 5 * full.u
                         height: width
                         radius: width / 2
-                        color: enf.armed ? Style.red : enf.stale ? "transparent" : full.muted
+                        color: enf.armed ? full.app.accent : enf.stale ? "transparent" : full.muted
                         border.width: enf.stale ? 1 : 0
                         border.color: full.muted
                     }

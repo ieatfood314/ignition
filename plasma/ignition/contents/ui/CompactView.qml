@@ -25,7 +25,7 @@ MouseArea {
         height: compact.side * 0.7
         width: height
         visible: compact.phase === "idle" && !compact.app.arming
-        color: compact.app.client.online ? Style.red : Style.alpha(Kirigami.Theme.textColor, Style.secondary)
+        color: compact.app.client.online ? compact.app.accent : Style.alpha(Kirigami.Theme.textColor, Style.secondary)
         opacity: compact.containsMouse ? 1 : 0.9
     }
 
@@ -37,10 +37,10 @@ MouseArea {
         count: 24
         dotSize: Math.max(2, width / 13)
         fraction: compact.app.arming ? (4 - compact.app.arming) / 3 : compact.app.fraction
-        litColor: compact.app.arming ? Style.red
+        litColor: compact.app.arming ? compact.app.accent
             : compact.phase === "countdown" ? Style.alpha(Kirigami.Theme.textColor, Style.secondary)
             : Kirigami.Theme.textColor
-        emberColor: Style.red
+        emberColor: compact.app.accent
     }
 
     Text {
@@ -49,7 +49,7 @@ MouseArea {
         text: compact.app.arming ? compact.app.arming
             : compact.phase === "countdown" ? "T" + compact.mins
             : compact.mins < 100 ? compact.mins : Math.floor(compact.mins / 60) + "H"
-        color: compact.phase === "countdown" || compact.app.arming ? Style.red : Kirigami.Theme.textColor
+        color: compact.phase === "countdown" || compact.app.arming ? compact.app.accent : Kirigami.Theme.textColor
         font.family: Style.dot
         font.pixelSize: compact.side * (text.length > 2 ? 0.27 : 0.36)
     }

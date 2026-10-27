@@ -3,7 +3,7 @@ import org.kde.kirigami as Kirigami
 import "Style.js" as Style
 
 // A ring of dots, lit clockwise from 12 o'clock for `fraction` of the way round. The last lit dot is the
-// ember: it can glow red while the rest stay in the theme's colour.
+// ember: it can glow in the accent while the rest stay in the theme's colour.
 Item {
     id: ring
 
