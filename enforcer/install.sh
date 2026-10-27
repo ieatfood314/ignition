@@ -19,6 +19,9 @@ this for you.
   --t3-ports LIST     T3 Code ports to cut off during a burn (e.g. 3773); T3 Code itself keeps running
   --hook-burn CMD     shell command to run when a burn starts (\$IGNITION_COLOR is the accent, e.g. e23a29)
   --hook-idle CMD     shell command to run when it ends
+  --hook-countdown CMD  shell command to run when a T-minus starts (\$IGNITION_COLOR is amber, ff8000)
+  --hook-steps N      re-run the burn and countdown hooks as each 1/N of them passes, with \$IGNITION_STEPS=N
+                      and \$IGNITION_LEFT the steps to go (0 turns it off)
 
 Re-running keeps settings you don't pass. It also turns off DNS-over-HTTPS in Firefox, Zen and Chrome
 through their policy files, because DoH skips /etc/hosts, which is how sites get blocked.
@@ -26,7 +29,7 @@ USAGE
     exit 1
 }
 
-url= user=${SUDO_USER:-} host= ports= block= block_ports= hook_burn= hook_idle= notify=
+url= user=${SUDO_USER:-} host= ports= block= block_ports= hook_burn= hook_idle= hook_countdown= hook_steps= notify=
 while [ $# -gt 0 ]; do
     case $1 in
         --server-url) url=$2; shift 2 ;;
@@ -37,6 +40,8 @@ while [ $# -gt 0 ]; do
         --block-ports) block_ports=$2; shift 2 ;;
         --hook-burn) hook_burn=$2; shift 2 ;;
         --hook-idle) hook_idle=$2; shift 2 ;;
+        --hook-countdown) hook_countdown=$2; shift 2 ;;
+        --hook-steps) hook_steps=$2; shift 2 ;;
         --notify) notify=on; shift ;;
         --no-notify) notify=off; shift ;;
         *) usage ;;
@@ -57,11 +62,11 @@ mkdir -p /etc/ignition
 
 # Write the config first: it can still refuse (e.g. port blocks without nftables) before anything is installed.
 python3 -I - "$url" "$host" "$(hostname -s)" "$ports" "$block" "$block_ports" "$hook_burn" "$hook_idle" \
-    "$app" "$user" "$notify" <<'PY'
+    "$hook_countdown" "$hook_steps" "$app" "$user" "$notify" <<'PY'
 import json, shutil, sys
 from pathlib import Path
 
-url, host, hostname, ports, block, block_ports, hook_burn, hook_idle, app, user, notify = sys.argv[1:]
+url, host, hostname, ports, block, block_ports, hook_burn, hook_idle, hook_countdown, hook_steps, app, user, notify = sys.argv[1:]
 path = Path("/etc/ignition/enforcer.json")
 try:
     cfg = json.loads(path.read_text())
@@ -93,6 +98,10 @@ if hook_burn:
     hooks["burn"] = hook_burn
 if hook_idle:
     hooks["idle"] = hook_idle
+if hook_countdown:
+    hooks["countdown"] = hook_countdown
+if hook_steps:
+    hooks["steps"] = int(hook_steps)
 if hooks:
     cfg["hooks"] = hooks
 # Notifications are on for new installs; re-runs keep whatever was chosen before.

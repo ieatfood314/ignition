@@ -74,6 +74,8 @@ options you don't pass. Config lives in `/etc/ignition/enforcer.json`. Edit it a
 | `--t3-ports LIST` | [T3 Code](https://github.com/pingdotgg/t3code) ports to cut off during a burn, e.g. `3773`. |
 | `--hook-burn CMD` | Shell command to run when a burn starts. `$IGNITION_COLOR` is the accent, e.g. `e23a29`. |
 | `--hook-idle CMD` | Shell command to run when it ends. |
+| `--hook-countdown CMD` | Shell command to run when a T-minus starts. `$IGNITION_COLOR` is amber, `ff8000`. |
+| `--hook-steps N` | Re-run the burn and countdown hooks each time another 1/N of them passes, with `$IGNITION_STEPS` set to N and `$IGNITION_LEFT` to the steps still to go. |
 
 `--block-ports` and `--t3-ports` need nftables (`apt/dnf/pacman install nftables`).
 
@@ -96,6 +98,22 @@ devices by name, and `IGNITION_IDLE_COLOR` (e.g. `ffffff`) for RAM that doesn't 
   --hook-burn 'IGNITION_COLOR=ff0000 /usr/local/lib/ignition/openrgb-ram burn' \
   --hook-idle 'IGNITION_IDLE_COLOR=ffffff /usr/local/lib/ignition/openrgb-ram idle'
 ```
+
+Add a countdown hook and steps and the RAM counts down instead: each stick becomes a gauge that goes out a
+part at a time, so with 5 steps on sticks of 5 LEDs every LED is 20% of the burn or T-minus. A burn is red and
+lit from the LED 1 end; a T-minus is amber and lit from the other end, upside down to it. Every stick shows the
+same gauge. If LED 1 is at the top of your sticks, `IGNITION_RGB_FLIP=1` swaps the ends, so a burn drains
+from the top like a fuel gauge:
+
+```sh
+  --hook-burn 'IGNITION_COLOR=ff0000 IGNITION_RGB_FLIP=1 /usr/local/lib/ignition/openrgb-ram burn' \
+  --hook-countdown 'IGNITION_RGB_FLIP=1 /usr/local/lib/ignition/openrgb-ram countdown' \
+  --hook-idle 'IGNITION_IDLE_COLOR=ffffff /usr/local/lib/ignition/openrgb-ram idle' \
+  --hook-steps 5
+```
+
+The gauge needs per-LED colour (OpenRGB's Direct mode), which some RAM forgets over a suspend, so the
+enforcer repaints it after a resume.
 
 ### How the lockout works on computers
 

@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """Recolour this machine's RAM while a burn is on, and put it back afterwards.
 
-Used as an ignition enforcer hook (hooks.burn / hooks.idle). The enforcer runs it as root with
-$IGNITION_COLOR set to ignition's accent (e.g. e23a29).
+Used as an ignition enforcer hook (hooks.burn / hooks.countdown / hooks.idle). The enforcer runs it as root
+with $IGNITION_COLOR set to ignition's accent (e.g. e23a29), or amber for a T-minus.
 
-  openrgb-ram burn   # set every DRAM device to static $IGNITION_COLOR
-  openrgb-ram idle   # put them back: static $IGNITION_IDLE_COLOR if set, else the profile saved at burn
+  openrgb-ram burn       # set every DRAM device to static $IGNITION_COLOR
+  openrgb-ram countdown  # the same, for a T-minus
+  openrgb-ram idle       # put them back: static $IGNITION_IDLE_COLOR if set, else the profile saved at burn
+
+With hooks.steps set, the enforcer also passes $IGNITION_STEPS and $IGNITION_LEFT (how many of those steps
+are still to go), and each stick becomes a gauge that goes out one part at a time: with 5 steps and 5 LEDs
+a stick, every LED is 20% of the burn or T-minus. A burn's lit LEDs sit at the LED 1 end of the stick and a
+T-minus's at the other, so the two read upside down to each other; IGNITION_RGB_FLIP=1 swaps the ends.
+Every zone (stick) shows the same gauge. A gauge needs per-LED colour, i.e. Direct mode, which some RAM
+forgets over a suspend; the enforcer repaints after a resume.
 
 Only RAM is ever opened. OpenRGB runs with its own config (CONFIG_DIR) that turns off every detector
 without "DRAM" in its name: a full detection takes over other devices too, and Razer keyboards, for one,
@@ -14,9 +22,11 @@ go dark when it does, whatever they were set to.
 Some RAM (HyperX Fury, for one) reads back as black, so a saved profile restores it dark. For those, set
 IGNITION_IDLE_COLOR to the colour it normally is. A marker file (MARKER) exists for as long as the RAM is
 recoloured, so other scripts that keep the RAM a colour can stand aside or follow the burn; it also stops
-a restart mid-burn from saving the already-recoloured state as the profile.
+a restart mid-burn from saving the already-recoloured state as the profile. It holds the OpenRGB mode and
+colours last painted ("direct ff0000,000000,..." or "static ff0000"), so such a script can repaint them.
 """
 import json
+import math
 import os
 import re
 import shutil
@@ -73,12 +83,14 @@ def ram_only_config():
 
 
 def devices():
-    """[(index, name)] from `--list-devices` (index line "N: Name"), ignoring per-device detail lines."""
+    """[{index, name, zones, leds}] from `--list-detailed`: an "N: Name" line, then indented details."""
     out = []
-    for line in run("--list-devices").stdout.splitlines():
+    for line in run("--list-detailed").stdout.splitlines():
         m = re.match(r"^(\d+):\s+(.*\S)", line)
         if m:
-            out.append((int(m.group(1)), m.group(2)))
+            out.append({"index": int(m.group(1)), "name": m.group(2), "zones": 0, "leds": 0})
+        elif out and (m := re.match(r"^\s+(Zones|LEDs):(.*)", line)):
+            out[-1][m.group(1).lower()] = len(re.findall(r"'[^']*'", m.group(2)))
     return out
 
 
@@ -88,14 +100,14 @@ def targets():
     devs = devices()
     override = os.environ.get("IGNITION_RGB_DEVICES", "").strip()
     if not override:
-        return [i for i, _ in devs]
-    picks = []
+        return devs
+    picks = set()
     for tok in (t.strip() for t in override.split(",") if t.strip()):
         if tok.isdigit():
-            picks += [i for i, _ in devs if i == int(tok)]
+            picks |= {d["index"] for d in devs if d["index"] == int(tok)}
         else:
-            picks += [i for i, n in devs if tok.lower() in n.lower()]
-    return sorted(set(picks))
+            picks |= {d["index"] for d in devs if tok.lower() in d["name"].lower()}
+    return [d for d in devs if d["index"] in picks]
 
 
 def find_targets():
@@ -114,22 +126,49 @@ def color(var, default=None):
     return c or default
 
 
-def paint(c):
-    for i in find_targets():
-        r = run("--device", str(i), "--mode", "static", "--color", c)
+def gauge(dev, c, left, steps, top):
+    """Per-LED colours for a device: in every zone, the share of LEDs still to go lit in c and the rest
+    off, lit from the LED 1 end of the zone, or from the other end if top."""
+    zones = max(1, dev["zones"])
+    per = dev["leds"] // zones
+    lit = math.ceil(left * per / steps)
+    zone = [c if i < lit else "000000" for i in range(per)]
+    if top:
+        zone.reverse()
+    return ",".join(zone * zones + [c] * (dev["leds"] - per * zones))
+
+
+def paint(c, phase=None):
+    """Static c on every target, or with $IGNITION_STEPS a gauge (see the top) in Direct mode."""
+    steps, left = (int(os.environ.get(v) or 0) for v in ("IGNITION_STEPS", "IGNITION_LEFT"))
+    top = (phase == "countdown") != (os.environ.get("IGNITION_RGB_FLIP", "") not in ("", "0"))
+    painted = None
+    for d in find_targets():
+        if phase and steps > 0 and d["leds"]:
+            painted = ("direct", gauge(d, c, left, steps, top))
+        else:
+            painted = ("static", c)
+        r = run("--device", str(d["index"]), "--mode", painted[0], "--color", painted[1])
         if r.returncode:
-            sys.exit(f"openrgb device {i}: {(r.stderr or r.stdout).strip()}")
+            sys.exit(f"openrgb device {d['index']}: {(r.stderr or r.stdout).strip()}")
+    return painted
 
 
-def burn():
+def write_marker(painted):
+    with open(MARKER + ".tmp", "w") as f:
+        f.write(" ".join(painted) + "\n" if painted else "")
+    os.replace(MARKER + ".tmp", MARKER)
+
+
+def burn(phase="burn"):
     ram_only_config()
     if not os.path.exists(MARKER):
         if not color("IGNITION_IDLE_COLOR"):
             find_targets()
             run("--save-profile", PROFILE)
         os.makedirs(os.path.dirname(MARKER), exist_ok=True)
-        open(MARKER, "w").close()
-    paint(color("IGNITION_COLOR", DEFAULT_COLOR))
+        write_marker(None)
+    write_marker(paint(color("IGNITION_COLOR", DEFAULT_COLOR), phase))
 
 
 def idle():
@@ -146,4 +185,5 @@ def idle():
 
 
 if __name__ == "__main__":
-    {"burn": burn, "idle": idle}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: sys.exit("usage: openrgb-ram burn|idle"))()
+    {"burn": burn, "countdown": lambda: burn("countdown"), "idle": idle}.get(
+        sys.argv[1] if len(sys.argv) > 1 else "", lambda: sys.exit("usage: openrgb-ram burn|countdown|idle"))()

@@ -15,11 +15,14 @@ shared block list. While a session is active it:
     session began. Ones already open at liftoff are frozen until it ends instead (and their windows
     minimized), so a game resumes where it was; a T-minus warns a minute before liftoff;
   * runs the optional burn/idle hooks (e.g. to recolour RGB lighting).
+With hooks.steps set, the burn hook re-runs each time another 1/steps of the burn is used up, and a
+countdown hook does the same through a T-minus, so the lighting can count down (see openrgb-ram).
 The last known session and block list are cached on disk, so blocks hold until the session ends even if
 the server is unreachable.
 """
 
 import json
+import math
 import os
 import shutil
 import signal
@@ -41,6 +44,7 @@ HOSTS = Path("/etc/hosts")
 HOSTS_BEGIN = "# >>> ignition: blocked while burning >>>"
 HOSTS_END = "# <<< ignition <<<"
 ACCENT = "e23a29"
+COUNTDOWN_COLOR = "ff8000"
 
 # Other domains that belong to a site; subdomains are covered separately.
 ALIASES = {
@@ -94,6 +98,11 @@ class Enforcer:
         self.local_block = [r["name"] for r in cfg.get("block_processes") or []]
         self.block_ports = [int(p) for p in cfg.get("block_ports") or []]
         self.hooks = cfg.get("hooks") or {}
+        self.steps = int(self.hooks.get("steps") or 0)
+        self.shown = ("idle", 0)  # what the hooks last showed: (hook, steps left)
+        self.hook_next = None  # the hook run waiting for the hook thread; only the latest is kept
+        self.hook_busy = False
+        self.hook_cv = threading.Condition()
         self.notify_user = cfg.get("notify_user")
         self.session = self.load_cache()
         self.remote = self.session.pop("block", None) or {"sites": [], "programs": []}
@@ -142,7 +151,8 @@ class Enforcer:
                 s = json.load(r)
         except Exception as e:  # noqa: BLE001 — offline: keep enforcing the cached session
             return f"server unreachable: {e}"
-        new = {k: s.get(k) for k in ("active", "session_id", "started_at", "ends_at")}
+        new = {k: s.get(k) for k in ("active", "phase", "session_id", "started_at", "ends_at")}
+        new["created_at"] = (s.get("session") or {}).get("created_at")
         remote = s.get("block") or self.remote
         if new != self.session or remote != self.remote:
             self.session, self.remote = new, remote
@@ -275,20 +285,67 @@ class Enforcer:
 
     # ---------- hooks ----------
 
-    def run_hook(self, name):
+    def display(self):
+        """(hook, steps left) the hooks should be showing: the burn or the T-minus, with how many of
+        self.steps parts of it are still to go (0 without steps), or ("idle", 0)."""
+        s, t = self.session, time.time()
+        if self.active():
+            name, a, b = "burn", s.get("started_at") or t, s["ends_at"]
+        elif s.get("phase") == "countdown" and t < (s.get("started_at") or 0):
+            name, a, b = "countdown", s.get("created_at") or t, s["started_at"]
+        else:
+            return "idle", 0
+        if not self.hooks.get(name):
+            return "idle", 0
+        if not self.steps:
+            return name, 0
+        return name, max(1, min(self.steps, math.ceil((b - t) / max(1, b - a) * self.steps)))
+
+    def show(self, again=False):
+        """Run the hook for whatever should be showing, if that changed (or again, e.g. after a resume)."""
+        want = self.display()
+        if want != self.shown or (again and want[0] != "idle"):
+            self.shown = want
+            self.run_hook(*want)
+
+    def run_hook(self, name, left=0):
+        with self.hook_cv:
+            self.hook_next = (name, left)
+            self.hook_cv.notify_all()
+
+    def hook_loop(self):
+        # One hook at a time, so two OpenRGB runs never fight over the bus; a run that's overtaken while
+        # waiting is skipped, because every run paints the whole state.
+        while True:
+            with self.hook_cv:
+                while not self.hook_next:
+                    self.hook_cv.wait()
+                (name, left), self.hook_next, self.hook_busy = self.hook_next, None, True
+            try:
+                self.call_hook(name, left)
+            finally:
+                with self.hook_cv:
+                    self.hook_busy = False
+                    self.hook_cv.notify_all()
+
+    def call_hook(self, name, left):
         cmd = self.hooks.get(name)
         if not cmd:
             return
-        env = {**os.environ, "IGNITION_COLOR": self.hooks.get("color") or ACCENT, "IGNITION_PHASE": name}
+        color = (self.hooks.get("countdown_color") or COUNTDOWN_COLOR) if name == "countdown" else None
+        env = {**os.environ, "IGNITION_COLOR": color or self.hooks.get("color") or ACCENT, "IGNITION_PHASE": name}
+        if self.steps and name != "idle":
+            env.update(IGNITION_STEPS=str(self.steps), IGNITION_LEFT=str(left))
+        try:
+            r = subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True, timeout=90)
+            if r.returncode:
+                log(f"{name} hook exited {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}")
+        except Exception as e:  # noqa: BLE001
+            log(f"{name} hook failed: {e}")
 
-        def go():
-            try:
-                r = subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True, timeout=60)
-                if r.returncode:
-                    log(f"{name} hook exited {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}")
-            except Exception as e:  # noqa: BLE001
-                log(f"{name} hook failed: {e}")
-        threading.Thread(target=go, daemon=True).start()
+    def wait_hooks(self, timeout):
+        with self.hook_cv:
+            self.hook_cv.wait_for(lambda: not self.hook_next and not self.hook_busy, timeout)
 
     # ---------- process blocking ----------
 
@@ -505,18 +562,17 @@ class Enforcer:
 
     # ---------- loops ----------
 
-    def enforce(self):
+    def enforce(self, resumed=False):
+        self.show(again=resumed)
         if not self.active():
             if self.armed:
                 log("session over: lifting blocks")
-                self.run_hook("idle")
             self.clear_nft()
             self.apply_hosts([])
             self.armed = False
             return
         if not self.armed:
             log(f"session active until {time.ctime(self.session['ends_at'])}: arming")
-            self.run_hook("burn")
         self.apply_hosts(self.remote.get("sites") or [])
         if self.t3.get("ports") or self.block_ports:
             self.apply_nft()
@@ -525,10 +581,15 @@ class Enforcer:
         self.armed = True
 
     def main_loop(self):
+        last = time.time() - time.monotonic()
         while not self.stop.is_set():
+            # The monotonic clock stops while suspended and the wall clock doesn't, so a jump between them
+            # means the machine slept. RGB set in Direct mode is lost over a sleep, so the hooks repaint.
+            offset = time.time() - time.monotonic()
+            resumed, last = offset - last > 15, offset
             err = self.sync()
             try:
-                self.enforce()
+                self.enforce(resumed)
                 self.error = err
             except Exception as e:  # noqa: BLE001
                 self.error = str(e)
@@ -553,15 +614,15 @@ class Enforcer:
         signal.signal(signal.SIGTERM, shutdown)
         signal.signal(signal.SIGINT, shutdown)
         log(f"ignition enforcer for {self.host} -> {self.url}")
-        t = threading.Thread(target=self.process_loop, daemon=True)
-        t.start()
+        threading.Thread(target=self.process_loop, daemon=True).start()
+        threading.Thread(target=self.hook_loop, daemon=True).start()
         self.main_loop()
         self.thaw()
         self.clear_nft()
         self.apply_hosts([])
-        if self.armed:
+        if self.shown[0] != "idle":
             self.run_hook("idle")
-            time.sleep(2)
+            self.wait_hooks(60)
         log("stopped; blocks lifted")
 
 
