@@ -128,7 +128,7 @@ while and haven't.
 | | On your phone | On your computers |
 | --- | --- | --- |
 | **Websites** | In every browser | In every browser |
-| **Apps** | The ones you pick, or every game. Open one and you're sent to the home screen | Programs you name (like `steam`) are closed if started |
+| **Apps** | The ones you pick, or every game. Open one and you're sent to the home screen | Programs you name (like `steam`) are closed if you start them. Already open at liftoff, they're paused until the burn ends, with a heads-up a minute before a T-minus |
 
 You set it once in **⚙ → Blocking**. With sync on, it applies everywhere.
 

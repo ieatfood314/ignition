@@ -12,7 +12,8 @@ shared block list. While a session is active it:
   * cuts off other local services completely (block_ports), e.g. a self-hosted video server;
   * points blocked sites at 0.0.0.0 in /etc/hosts;
   * kills blocked programs (e.g. topgrade, lutris), and anything they spawned, if started after the
-    session began;
+    session began. Ones already open at liftoff are frozen until it ends instead (and their windows
+    minimized), so a game resumes where it was; a T-minus warns a minute before liftoff;
   * runs the optional burn/idle hooks (e.g. to recolour RGB lighting).
 The last known session and block list are cached on disk, so blocks hold until the session ends even if
 the server is unreachable.
@@ -25,6 +26,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -32,6 +34,8 @@ from pathlib import Path
 
 NFT_TABLE = "ignition"
 CACHE = Path("/var/lib/ignition/state.json")
+FROZEN = Path("/var/lib/ignition/frozen.json")
+WARN_SECONDS = 60  # heads-up before a T-minus liftoff pauses open programs
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 HOSTS = Path("/etc/hosts")
 HOSTS_BEGIN = "# >>> ignition: blocked while burning >>>"
@@ -98,6 +102,9 @@ class Enforcer:
         self.killed = 0
         self.last_notify = 0
         self.stop = threading.Event()
+        self.freeze_lock = threading.Lock()
+        self.frozen = self.load_frozen()  # pid -> start time (clock ticks) of what's paused
+        self.warned = None  # the T-minus whose one-minute warning was shown
 
     # ---------- session state ----------
 
@@ -299,12 +306,11 @@ class Enforcer:
                 return name
         return None
 
-    def kill_blocked_processes(self):
-        started = self.session.get("started_at") or 0
+    def scan(self):
+        """Running blocked programs as [(pid, name, started, uid)], plus every process's children."""
         btime, hz = self.boot_time(), os.sysconf("SC_CLK_TCK")
         names = self.block
-        hits, children = [], {}
-        targets = []
+        found, children = [], {}
         for d in Path("/proc").iterdir():
             if not d.name.isdigit():
                 continue
@@ -321,14 +327,30 @@ class Enforcer:
                 uid = (d / "status").read_text().split("\nUid:")[1].split()[0]
             except (OSError, IndexError, ValueError):
                 continue
-            if start >= started:
-                targets.append((int(d.name), name, uid))
-        for pid, name, uid in targets:
+            found.append((int(d.name), name, start, uid))
+        return found, children
+
+    @staticmethod
+    def tree(pid, children):
+        tree, i = [pid], 0
+        while i < len(tree):
+            tree += children.get(tree[i], [])
+            i += 1
+        return tree
+
+    def kill_blocked_processes(self):
+        """Kill blocked programs started during the burn; pause the ones that were already open."""
+        started = self.session.get("started_at") or 0
+        found, children = self.scan()
+        hits, paused = [], []
+        for pid, name, start, uid in found:
+            tree = self.tree(pid, children)
+            if start < started:
+                if self.freeze(tree):
+                    paused.append(name)
+                    log(f"paused {name} pid={pid} uid={uid} ({len(tree)} process(es))")
+                continue
             # Take what it spawned down with it (topgrade -> sudo pacman, ...): those all started later.
-            tree, i = [pid], 0
-            while i < len(tree):
-                tree += children.get(tree[i], [])
-                i += 1
             for p in tree:
                 try:
                     os.kill(p, signal.SIGKILL)
@@ -336,27 +358,150 @@ class Enforcer:
                     pass
             hits.append(name)
             log(f"killed {name} pid={pid} uid={uid}" + (f" and {len(tree) - 1} child(ren)" if len(tree) > 1 else ""))
-        if hits:
+        if paused:
+            ends = time.strftime("%H:%M", time.localtime(self.session.get("ends_at", 0)))
+            self.notify(f"{paused[0].capitalize()} is paused", f"Ignition is burning until {ends}. It picks up "
+                        "right where you left it after.")
+        elif hits:
             self.notify(f"{hits[0].capitalize()} is blocked", self.remaining_text())
+
+    # A blocked program that's already open at liftoff is frozen (SIGSTOP) instead of killed, so a game
+    # comes back exactly where it was when the burn ends. Sending it SIGCONT yourself doesn't help: it's
+    # frozen again within a second.
+
+    @staticmethod
+    def proc_start(pid):
+        """(state, start time in clock ticks) of a process, or None if it's gone."""
+        try:
+            fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+            return fields[0], int(fields[19])
+        except (OSError, IndexError, ValueError):
+            return None
+
+    @staticmethod
+    def serves_fuse(pid):
+        # A frozen FUSE server (a game's squashed filesystem, ...) would hang anything that touches its
+        # mount, like a file manager or an indexer, so it's left running; with the game frozen it's idle.
+        try:
+            return any(os.readlink(f) == "/dev/fuse" for f in Path(f"/proc/{pid}/fd").iterdir())
+        except OSError:
+            return False
+
+    def load_frozen(self):
+        try:
+            return {int(k): v for k, v in json.loads(FROZEN.read_text()).items()}
+        except (OSError, ValueError):
+            return {}
+
+    def save_frozen(self):
+        FROZEN.parent.mkdir(parents=True, exist_ok=True)
+        tmp = FROZEN.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.frozen))
+        tmp.replace(FROZEN)
+
+    def freeze(self, tree):
+        """Freeze a process tree. True if any of it was newly frozen (not just re-frozen)."""
+        with self.freeze_lock:
+            if self.stop.is_set():
+                return False
+            todo = []
+            for p in tree:
+                st = self.proc_start(p)
+                if not st or st[0] in "Tt" or (p not in self.frozen and self.serves_fuse(p)):
+                    continue
+                todo.append((p, st[1]))
+            if not todo:
+                return False
+            fresh = [p for p, _ in todo if p not in self.frozen]
+            if fresh:
+                self.minimize(fresh)
+            for p, ticks in todo:
+                try:
+                    os.kill(p, signal.SIGSTOP)
+                    self.frozen[p] = ticks
+                except OSError:
+                    pass
+            self.save_frozen()
+            if not fresh:
+                log(f"froze {len(todo)} process(es) again")
+            return bool(fresh)
+
+    def thaw(self):
+        with self.freeze_lock:
+            if not self.frozen:
+                return
+            for p, ticks in reversed(list(self.frozen.items())):
+                st = self.proc_start(p)
+                if st and st[1] == ticks:  # not a new process that reused the pid
+                    try:
+                        os.kill(p, signal.SIGCONT)
+                    except OSError:
+                        pass
+            log(f"resumed {len(self.frozen)} paused process(es)")
+            self.frozen = {}
+            self.save_frozen()
+        self.notify("Burn complete", "Everything ignition paused is back where you left it.")
+
+    def minimize(self, pids):
+        """Minimize these processes' windows (KDE Plasma), so a frozen full-screen game isn't in the way."""
+        script = (
+            f"const pids = {json.dumps(pids)};\n"
+            "(workspace.windowList ? workspace.windowList() : workspace.clientList()).forEach(w => {\n"
+            "    if (pids.includes(w.pid)) w.minimized = true;\n"
+            "});\n"
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".js", prefix="ignition-") as f:
+            f.write(script)
+            f.flush()
+            os.chmod(f.name, 0o644)
+            call = ["dbus-send", "--session", "--print-reply", "--dest=org.kde.KWin"]
+            unload = [*call, "/Scripting", "org.kde.kwin.Scripting.unloadScript", "string:ignition-minimize"]
+            self.as_user(*unload)
+            out = self.as_user(*call, "/Scripting", "org.kde.kwin.Scripting.loadScript",
+                               f"string:{f.name}", "string:ignition-minimize")
+            sid = out.split()[-1] if out and "int32" in out else None
+            if sid and sid != "-1":
+                self.as_user(*call, f"/Scripting/Script{sid}", "org.kde.kwin.Script.run")
+            self.as_user(*unload)
+
+    def warn_liftoff(self):
+        """A minute before a T-minus lifts off, say what it'll pause, so there's time to get to a checkpoint."""
+        s = self.session
+        left = (s.get("started_at") or 0) - time.time()
+        if not self.block or not s.get("session_id") or self.warned == s["session_id"] or not 0 < left <= WARN_SECONDS:
+            return
+        self.warned = s["session_id"]
+        names = sorted({name for _, name, _, _ in self.scan()[0]})
+        if names:
+            what = ", ".join(n.capitalize() for n in names)
+            self.notify(f"Liftoff in {round(left)} seconds",
+                        f"{what} will be paused for the burn, and picks up where you left off after.")
 
     def remaining_text(self):
         mins = max(0, int((self.session.get("ends_at", 0) - time.time()) // 60) + 1)
         return f"Ignition is burning: {mins} min left. Back to work."
 
+    def as_user(self, *cmd):
+        """Run a command on the desktop user's session bus; its output, or None."""
+        if not self.notify_user:
+            return None
+        try:
+            uid = int(run(["id", "-u", self.notify_user]).stdout.strip())
+            return subprocess.run(
+                ["runuser", "-u", self.notify_user, "--", "env",
+                 f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus", *cmd],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            return None
+
     def notify(self, title, body):
         if not self.notify_user or time.time() - self.last_notify < 10:
             return
         self.last_notify = time.time()
-        try:
-            uid = int(run(["id", "-u", self.notify_user]).stdout.strip())
-        except ValueError:
-            return
-        subprocess.Popen(
-            ["runuser", "-u", self.notify_user, "--", "env",
-             f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
-             "notify-send", "-a", "ignition", "-u", "critical", title, body],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        threading.Thread(
+            target=self.as_user, args=("notify-send", "-a", "ignition", "-u", "critical", title, body), daemon=True,
+        ).start()
 
     # ---------- loops ----------
 
@@ -392,11 +537,14 @@ class Enforcer:
 
     def process_loop(self):
         while not self.stop.is_set():
-            if self.block and self.active():
-                try:
+            try:
+                if not self.active():
+                    self.thaw()
+                    self.warn_liftoff()
+                elif self.block:
                     self.kill_blocked_processes()
-                except Exception as e:  # noqa: BLE001
-                    log(f"process scan failed: {e}")
+            except Exception as e:  # noqa: BLE001
+                log(f"process scan failed: {e}")
             self.stop.wait(1)
 
     def run(self):
@@ -408,6 +556,7 @@ class Enforcer:
         t = threading.Thread(target=self.process_loop, daemon=True)
         t.start()
         self.main_loop()
+        self.thaw()
         self.clear_nft()
         self.apply_hosts([])
         if self.armed:
