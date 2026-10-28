@@ -86,7 +86,7 @@ PlasmoidItem {
                 online: client.online
                 note: root.daily || root.weekly ? "" : "SET GOALS ›"
                 TapHandler {
-                    onTapped: Qt.openUrlExternally(client.url)
+                    onTapped: Qt.openUrlExternally(client.base() + (root.daily || root.weekly ? "/#stats" : "/#settings/goals"))
                 }
             }
 

@@ -238,7 +238,7 @@ IGNITION_TEST_SERVER=http://127.0.0.1:4597 gradle testDebugUnitTest
 
 `GET/POST /api/items`, `PATCH/DELETE /api/items/<id>`, `GET /api/ignite`, `POST /api/ignite` (`minutes`,
 `delay`), `POST /api/ignite/{stop,scrub,now,extend,skip}`, `GET/PUT /api/settings` (goals, schedules,
-block, launch_window), `GET /api/stats`, `POST /api/sync`, `GET /api/ping`,
+block, launch_window), `GET /api/stats`, `GET /api/burns` (every burn, for the Stats page), `POST /api/sync`, `GET /api/ping`,
 `POST /api/enforcer/heartbeat`.
 
 There's no authentication. Keep the server on localhost and your tailnet, which is what the installer does.

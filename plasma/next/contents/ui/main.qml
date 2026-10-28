@@ -88,7 +88,7 @@ PlasmoidItem {
                 online: client.online
                 note: root.open.length > full.fits ? `+${root.open.length - full.fits}` : ""
                 TapHandler {
-                    onTapped: Qt.openUrlExternally(client.url)
+                    onTapped: Qt.openUrlExternally(client.base() + "/#need")
                 }
             }
 

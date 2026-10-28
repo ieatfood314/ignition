@@ -163,6 +163,24 @@ object Logic {
             .put("days", days)
     }
 
+    /** Every stretch actually burned, oldest first, for the Stats page (same shape as GET /api/burns). */
+    fun burns(store: Store, t: Long = now()): JSONObject {
+        val out = JSONArray()
+        for (s in store.sessions.values.filter { !it.optBoolean("deleted") && it.optLong("starts_at") < t }.sortedBy { it.optLong("starts_at") }) {
+            val start = s.optLong("starts_at")
+            val endsAt = s.optLong("ends_at")
+            val stopped = s.longOrNull("stopped_at")
+            val end = minOf(endsAt, stopped ?: endsAt, t)
+            if (end <= start) continue // scrubbed before liftoff
+            out.put(
+                JSONObject().put("id", s.optString("id")).put("start", start).put("end", end)
+                    .put("minutes", s.optInt("minutes")).put("planned", planned(s)).put("source", s.optString("source", "manual"))
+                    .put("early", stopped != null && stopped < endsAt).put("live", stopped == null && endsAt > t),
+            )
+        }
+        return JSONObject().put("now", t).put("burns", out)
+    }
+
     // ---- state (same shape as GET /api/ignite on the server)
 
     fun igniteState(store: Store, t: Long = now()): JSONObject {

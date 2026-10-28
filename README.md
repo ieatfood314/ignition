@@ -119,6 +119,9 @@ hits zero.
 The **Need** and **Want** tabs are two simple lists: things you need to do (with due dates) and things
 you'd like to do someday. The top of the Need list shows under the button as *Up next*.
 
+The **Stats** tab shows how much you've burned over the last week, month, year or all time, which hours of
+the week you burn in, and every burn you've done.
+
 Settings also has **burn goals** (daily and weekly targets), **scheduled launches** that ignite on their
 own at set times, and a **launch window**, where your phone nudges you to start a burn if you've been home a
 while and haven't.

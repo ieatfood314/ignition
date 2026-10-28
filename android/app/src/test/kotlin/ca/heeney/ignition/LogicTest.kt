@@ -85,6 +85,27 @@ class LogicTest {
     }
 
     @Test
+    fun burnsListOnlyTimeThatBurned() {
+        val s = store()
+        val t = Logic.now()
+        s.putSession(Logic.newSession("done", 30, t - 7200, "manual"))
+        s.putSession(Logic.newSession("early", 90, t - 3000, "manual").put("stopped_at", t - 2000))
+        s.putSession(Logic.newSession("live", 50, t - 600, "schedule"))
+        s.putSession(Logic.newSession("future", 50, t + 600, "manual"))
+        s.putSession(Logic.newSession("scrubbed", 50, t - 100, "manual").put("stopped_at", t - 200))
+        s.putSession(Logic.newSession("skip", 1, t - 100, "schedule").put("deleted", true))
+        val burns = Logic.burns(s, t).getJSONArray("burns")
+        assertEquals(listOf("done", "early", "live"), (0 until burns.length()).map { burns.getJSONObject(it).getString("id") })
+        val done = burns.getJSONObject(0)
+        assertEquals(t - 7200 + 1800, done.getLong("end"))
+        assertFalse(done.getBoolean("early") || done.getBoolean("live"))
+        assertEquals(t - 2000, burns.getJSONObject(1).getLong("end"))
+        assertTrue(burns.getJSONObject(1).getBoolean("early"))
+        assertEquals(t, burns.getJSONObject(2).getLong("end"))
+        assertTrue(burns.getJSONObject(2).getBoolean("live"))
+    }
+
+    @Test
     fun tminusSaysTheTimeLeft() {
         val edge = 100_000L
         assertEquals("T-10 min", Logic.tminus(edge, edge - 600))

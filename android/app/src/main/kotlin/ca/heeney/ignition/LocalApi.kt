@@ -39,6 +39,7 @@ class LocalApi(private val context: Context) {
                 r == listOf("settings") && method == "GET" -> { mutated = false; Logic.cleanSettings(store.settings) }
                 r == listOf("settings") && method == "PUT" -> Logic.cleanSettings(body).also { store.putSettings(it) }
                 r == listOf("stats") -> { mutated = false; Logic.stats(store) }
+                r == listOf("burns") -> { mutated = false; Logic.burns(store) }
                 else -> throw ApiError(404, "not found")
             }
             if (mutated) store.save()

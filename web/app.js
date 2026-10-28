@@ -19,6 +19,7 @@ const state = {
   settings: null,
   clockOffset: 0,
   page: "ignite",
+  lastTab: "ignite",
   expanded: new Set(),
   pendingDelete: new Map(),
   rendered: new Set(),
@@ -463,7 +464,7 @@ function reloadIfStale(build) {
   if (!build) return; // the Android app updates as a whole
   state.build = state.build || build;
   if (build === state.build) return;
-  const busy = arming || addDialog.open || settingsDialog.open || mecoDialog.open ||
+  const busy = arming || addDialog.open || saveTimer || mecoDialog.open ||
     ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
   if (!busy) location.reload();
 }
@@ -583,9 +584,7 @@ function renderBurnStats(st) {
     return `<div class="goal${frac >= 1 ? " met" : ""}"><span class="goal-label">${label}</span><span class="goal-bar"><i style="width:${frac * 100}%"></i></span><span class="goal-val">${val}</span></div>`;
   };
   const rows = row("Today", st.today, goals.daily, "m") + row("This week", st.week, goals.weekly, "h");
-  box.innerHTML = rows || `<p class="burned">Burned today ${fmtDuration(st.today)} · this week ${fmtDuration(st.week)} · <button type="button" class="link" id="set-goals">set goals</button></p>`;
-  const sg = $("#set-goals");
-  if (sg) sg.onclick = openSettings;
+  box.innerHTML = rows || `<p class="burned">Burned today ${fmtDuration(st.today)} · this week ${fmtDuration(st.week)} · <a class="link" href="#settings/goals">set goals</a></p>`;
 }
 
 function renderNextSchedule(ns, phase) {
@@ -626,7 +625,15 @@ function renderWindowNote(phase) {
 }
 
 async function loadSettings() {
-  try { state.settings = await api("GET", "/api/settings"); renderIgnite(); } catch (e) { console.error(e); }
+  try {
+    const s = await api("GET", "/api/settings");
+    state.settings = s;
+    renderIgnite();
+    if (state.page === "stats") renderStats(); // the goal line
+    // Changed on another device while Settings is open: show it, unless you're typing here.
+    const typing = document.activeElement?.matches("#page-settings input, #page-settings textarea");
+    if (state.page === "settings" && settingsDoc && !saveTimer && !typing && stable(s) !== stable(settingsDoc)) fillSettings(s);
+  } catch (e) { console.error(e); }
 }
 
 $("#ignite-btn").addEventListener("click", () => {
@@ -704,7 +711,7 @@ document.addEventListener("click", (e) => {
 
 /* ---------------- settings ---------------- */
 
-const settingsDialog = $("#settings-dialog");
+const settingsEl = $("#page-settings");
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 let appInfo = null;
 let settingsDoc = null;   // the shared settings document as last loaded or saved
@@ -718,7 +725,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 function dayButtons(container, days) {
   container.innerHTML = DAY_LETTERS.map((l, i) =>
     `<button type="button" class="${days.includes(i + 1) ? "on" : ""}" data-day="${i + 1}" aria-label="day ${i + 1}">${l}</button>`).join("");
-  $$("button", container).forEach((b) => b.onclick = () => { b.classList.toggle("on"); paintSummaries(); });
+  $$("button", container).forEach((b) => b.onclick = () => { b.classList.toggle("on"); edited(); });
 }
 const readDays = (container) => $$("button.on", container).map((b) => Number(b.dataset.day));
 
@@ -738,7 +745,7 @@ function scheduleEl(sc) {
   $(".sched-on", li).checked = sc.enabled !== false;
   $(".sched-lead-min", li).value = sc.lead ?? 5;
   dayButtons($(".sched-days", li), sc.days);
-  $(".sched-del", li).onclick = () => { li.remove(); paintSummaries(); };
+  $(".sched-del", li).onclick = () => { li.remove(); edited(); };
   return li;
 }
 
@@ -746,10 +753,10 @@ function readSchedules() {
   return $$("#schedules .schedule").map((li) => ({
     id: li.dataset.id,
     time: $(".sched-time", li).value || "09:00",
-    minutes: parseInt($(".sched-min", li).value, 10) || 50,
-    enabled: $(".sched-on", li).checked,
-    lead: parseInt($(".sched-lead-min", li).value || "0", 10) || 0,
     days: readDays($(".sched-days", li)),
+    minutes: parseInt($(".sched-min", li).value, 10) || 50,
+    lead: parseInt($(".sched-lead-min", li).value || "0", 10) || 0,
+    enabled: $(".sched-on", li).checked,
   }));
 }
 
@@ -794,8 +801,8 @@ function paintHome() {
   el.textContent = `Home Wi-Fi: ${h.home}${h.here ? " (connected)" : ""}`;
 }
 
-$$("#lw-trigger button").forEach((b) => b.onclick = () => { setTrigger(b.dataset.trigger); paintSummaries(); });
-$("#lw-on").onchange = () => { $("#lw-body").classList.toggle("off", !$("#lw-on").checked); paintSummaries(); };
+$$("#lw-trigger button").forEach((b) => b.onclick = () => { setTrigger(b.dataset.trigger); edited(); });
+$("#lw-on").onchange = () => { $("#lw-body").classList.toggle("off", !$("#lw-on").checked); edited(); };
 $("#lw-home-set").onclick = async () => {
   try { appInfo = await api("PUT", "/native/app", { home_wifi: "current" }); paintHome(); }
   catch (e) { toast(e.message); }
@@ -813,13 +820,14 @@ function tagEl(label, title, onRemove) {
 
 function renderBlock() {
   const b = editBlock;
-  $("#block-sites").replaceChildren(...b.sites.map((s) => tagEl(s, null, () => { b.sites = b.sites.filter((x) => x !== s); renderBlock(); })));
-  $("#block-programs").replaceChildren(...b.programs.map((p) => tagEl(p, null, () => { b.programs = b.programs.filter((x) => x !== p); renderBlock(); })));
+  $("#block-sites").replaceChildren(...b.sites.map((s) => tagEl(s, null, () => { b.sites = b.sites.filter((x) => x !== s); blockEdited(); })));
+  $("#block-programs").replaceChildren(...b.programs.map((p) => tagEl(p, null, () => { b.programs = b.programs.filter((x) => x !== p); blockEdited(); })));
   const apps = [...b.apps].sort((x, y) => x.label.localeCompare(y.label));
-  $("#block-apps").replaceChildren(...apps.map((a) => tagEl(a.label, a.id, () => { b.apps = b.apps.filter((x) => x.id !== a.id); renderBlock(); })));
+  $("#block-apps").replaceChildren(...apps.map((a) => tagEl(a.label, a.id, () => { b.apps = b.apps.filter((x) => x.id !== a.id); blockEdited(); })));
   $("#block-games").checked = b.games;
   paintSummaries();
 }
+const blockEdited = () => { renderBlock(); scheduleSave(); };
 
 function cleanSite(v) {
   let s = v.trim().toLowerCase().replace(/^[a-z]+:\/\//, "").split(/[/?#]/)[0].split("@").pop().replace(/^\.+|\.+$/g, "");
@@ -835,7 +843,7 @@ function tagForm(form, add) {
     const bad = bits.filter((v) => !add(v));
     input.value = bad.join(" ");
     if (bad.length) toast(`Not sure what "${bad[0]}" is.`);
-    renderBlock();
+    blockEdited();
   });
 }
 tagForm($("#block-sites-add"), (v) => { const s = cleanSite(v); if (s && !editBlock.sites.includes(s)) editBlock.sites.push(s); return !!s; });
@@ -849,10 +857,9 @@ tagForm($("#block-apps-add"), (v) => {
   if (!editBlock.apps.some((a) => a.id === v)) editBlock.apps.push({ id: v, label: v });
   return true;
 });
-$("#block-games").onchange = (e) => { editBlock.games = e.target.checked; paintSummaries(); };
+$("#block-games").onchange = (e) => { editBlock.games = e.target.checked; edited(); };
 
 async function openAppPicker() {
-  goSettings("apps");
   if (!installedApps) {
     $("#app-pick").innerHTML = `<li class="hint">Loading…</li>`;
     await new Promise((r) => setTimeout(r, 30)); // let it paint before the blocking native call
@@ -863,6 +870,7 @@ async function openAppPicker() {
 }
 
 function renderAppPicker() {
+  if (!editBlock) return;
   const q = $("#app-search").value.trim().toLowerCase();
   const chosen = new Set(editBlock.apps.map((a) => a.id));
   const list = installedApps.filter((a) => !q || a.label.toLowerCase().includes(q) || a.id.includes(q));
@@ -873,33 +881,42 @@ function renderAppPicker() {
     const app = installedApps.find((a) => a.id === cb.dataset.id);
     editBlock.apps = editBlock.apps.filter((a) => a.id !== app.id);
     if (cb.checked) editBlock.apps.push({ id: app.id, label: app.label });
-    renderBlock();
+    blockEdited();
   });
 }
 $("#app-search").addEventListener("input", renderAppPicker);
-$("#block-apps-pick").onclick = openAppPicker;
+$("#block-apps-pick").onclick = () => { location.hash = "settings/apps"; };
 
 /* ---- pages */
 
+// Phones drill down from the list; wider screens keep the list beside the open page.
+const wide = matchMedia("(min-width: 721px)");
+
 function goSettings(page) {
+  if (!$(`.set-page[data-page="${page}"]`, settingsEl) || (page === "apps" && !NATIVE)) page = "home";
+  if (page === "home" && wide.matches) page = "goals";
   settingsPage = page;
-  $$(".set-page", settingsDialog).forEach((p) => { p.hidden = p.dataset.page !== page; });
-  const cur = $(`.set-page[data-page="${page}"]`, settingsDialog);
-  $("#settings-title").textContent = cur.dataset.title || "Settings";
-  $("#settings-back").hidden = page === "home";
-  settingsDialog.scrollTop = 0;
+  settingsEl.classList.toggle("at-home", page === "home");
+  $$(".set-page", settingsEl).forEach((p) => { p.hidden = p.dataset.page !== page; });
+  const lit = page === "apps" ? "blocking" : page;
+  $$(".set-link", settingsEl).forEach((a) => a.dataset.go === lit ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
+  const sub = page !== "home" && (!wide.matches || page === "apps");
+  $("#settings-title").textContent = sub ? $(`.set-page[data-page="${page}"]`, settingsEl).dataset.title : "Settings";
+  $("#settings-back").hidden = !sub;
+  $("#settings-back").href = page === "apps" ? "#settings/blocking" : "#settings";
+  window.scrollTo(0, 0);
   if (page === "home") paintSummaries();
+  if (page === "apps") openAppPicker();
 }
+
+const settingsSub = () => location.hash.split("/")[1] || "home";
+wide.addEventListener("change", () => { if (state.page === "settings") goSettings(settingsSub()); });
 
 function settingsBack() {
-  if (settingsPage === "apps") goSettings("blocking");
-  else if (settingsPage !== "home") goSettings("home");
-  else return false;
-  return true;
+  if (settingsPage === "apps") location.hash = "settings/blocking";
+  else if (settingsPage !== "home" && !wide.matches) location.hash = "settings";
+  else location.hash = state.lastTab;
 }
-
-$$(".set-link").forEach((b) => b.onclick = () => goSettings(b.dataset.go));
-$("#settings-back").onclick = settingsBack;
 
 function readSettingsForm() {
   return {
@@ -936,25 +953,24 @@ function paintSummaries() {
     $("#sum-sync").textContent = appInfo.server_url ? appInfo.server_url.replace(/^https?:\/\//, "") : "Off";
   }
 }
-settingsDialog.addEventListener("input", (e) => { if (!e.target.closest("#app-search")) paintSummaries(); });
+settingsEl.addEventListener("input", (e) => { if (!e.target.closest("#app-search, #server-url")) edited(); });
+
+function fillSettings(s) {
+  settingsDoc = s;
+  state.settings = s;
+  $("#goal-daily").value = s.goals.daily || "";
+  $("#goal-weekly").value = s.goals.weekly ? +(s.goals.weekly / 60).toFixed(1) : "";
+  $("#schedules").replaceChildren(...s.schedules.map(scheduleEl));
+  editBlock = JSON.parse(JSON.stringify(s.block));
+  fillWindow(s.launch_window);
+  $("#lw-body").classList.toggle("off", !s.launch_window.enabled);
+  renderBlock();
+  if (settingsPage === "apps" && installedApps) renderAppPicker();
+}
 
 async function openSettings() {
-  $("#settings-msg").textContent = "";
-  try {
-    const s = await api("GET", "/api/settings");
-    settingsDoc = s;
-    state.settings = s;
-    $("#goal-daily").value = s.goals.daily || "";
-    $("#goal-weekly").value = s.goals.weekly ? +(s.goals.weekly / 60).toFixed(1) : "";
-    $("#schedules").replaceChildren(...s.schedules.map(scheduleEl));
-    editBlock = JSON.parse(JSON.stringify(s.block));
-    fillWindow(s.launch_window);
-    $("#lw-body").classList.toggle("off", !s.launch_window.enabled);
-    renderBlock();
-  } catch (e) { $("#settings-msg").textContent = e.message; }
+  try { fillSettings(await api("GET", "/api/settings")); } catch (e) { toast(e.message); }
   if (NATIVE) await loadAppInfo();
-  goSettings("home");
-  settingsDialog.showModal();
 }
 
 async function loadAppInfo() {
@@ -993,36 +1009,40 @@ function paintSyncStatus() {
   $("#sync-status").textContent = text;
 }
 
-async function saveSettings(quiet) {
-  const body = readSettingsForm();
-  try {
-    settingsDoc = await api("PUT", "/api/settings", body);
-    state.settings = settingsDoc;
-    if (!quiet) toast("Saved.");
-    loadIgnite();
-    return true;
-  } catch (e) { $("#settings-msg").textContent = e.message; return false; }
-}
+/* ---- saving: every edit saves itself a moment later, and anything pending goes when you leave */
 
-const settingsChanged = () => settingsDoc && JSON.stringify(readSettingsForm()) !== JSON.stringify({
+// JSON with sorted keys, so two copies of the settings compare equal whatever order their keys are in.
+const stable = (v) => JSON.stringify(v, (k, x) => x && typeof x === "object" && !Array.isArray(x)
+  ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x);
+
+const settingsChanged = () => settingsDoc && stable(readSettingsForm()) !== stable({
   goals: settingsDoc.goals, schedules: settingsDoc.schedules, block: settingsDoc.block, launch_window: settingsDoc.launch_window,
 });
 
-// Closing never throws edits away: anything changed is saved on the way out.
-async function closeSettings() {
-  if (settingsChanged() && !(await saveSettings())) return;
-  settingsDialog.close();
+let saveTimer = null;
+function scheduleSave() {
+  if (!settingsDoc) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveSettings, 600);
 }
+function edited() { paintSummaries(); scheduleSave(); }
 
-$("#settings-btn").onclick = openSettings;
-$("#settings-close").onclick = closeSettings;
-settingsDialog.addEventListener("click", (e) => { if (e.target === settingsDialog) closeSettings(); });
-settingsDialog.addEventListener("cancel", (e) => { e.preventDefault(); if (!settingsBack()) closeSettings(); });
+async function saveSettings() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  if (!settingsChanged()) return;
+  try {
+    settingsDoc = await api("PUT", "/api/settings", readSettingsForm());
+    state.settings = settingsDoc;
+    loadIgnite();
+  } catch (e) { toast(`Couldn't save: ${e.message}`); }
+}
+const flushSettings = () => { if (saveTimer) saveSettings(); };
+
 $("#add-schedule").onclick = () => {
   $("#schedules").append(scheduleEl({ id: randomId(), time: "09:00", minutes: 50, lead: 5, enabled: true, days: [1, 2, 3, 4, 5] }));
-  paintSummaries();
+  edited();
 };
-$("#settings-save").onclick = async () => { if (await saveSettings()) settingsDialog.close(); };
 $("#server-test").onclick = async () => {
   $("#sync-status").textContent = "Checking…";
   await new Promise((r) => setTimeout(r, 50)); // let "Checking…" paint before the blocking native call
@@ -1079,41 +1099,309 @@ $("#meco-go").onclick = async () => {
   } catch (e) { toast(e.message); }
 };
 
+/* ---------------- stats ---------------- */
+
+// The server hands over raw burns; they're bucketed here, so days and hours are in this device's timezone.
+let burnsData = null;
+let logShown = 12;
+state.range = ["week", "month", "year", "all"].includes(ls.getItem("ignition.range")) ? ls.getItem("ignition.range") : "week";
+
+async function loadBurns() {
+  try {
+    burnsData = await api("GET", "/api/burns");
+    if (state.page === "stats") renderStats();
+  } catch (e) { console.error(e); }
+}
+
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const dayOf = (sec) => { const d = new Date(sec * 1000); d.setHours(0, 0, 0, 0); return d; };
+const secOf = (d) => d.getTime() / 1000;
+const mondayOf = (d) => addDays(d, -((d.getDay() + 6) % 7));
+// "6 PM", or "18:00" where clocks run to 24 (a bare "18" reads like a count).
+const fmtHour = (h) => new Date(2000, 0, 1, h).toLocaleTimeString(undefined,
+  new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hour12 ? { hour: "numeric" } : { hour: "2-digit", minute: "2-digit" });
+const weekdayName = (i, weekday = "short") => new Date(2024, 0, 1 + i).toLocaleDateString(undefined, { weekday }); // 2024-01-01 was a Monday
+const dateFmt = (d, opts) => d.toLocaleDateString(undefined, { ...opts, ...(d.getFullYear() !== new Date().getFullYear() && { year: "numeric" }) });
+const timeRange = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+function fmtTotal(sec) {
+  return sec >= 100 * 3600 ? `${Math.round(sec / 3600)}h` : fmtDuration(sec);
+}
+
+function dayLabel(d) {
+  const diff = Math.round((startOfToday() - d) / DAY);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return dateFmt(d, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function crunch(range, burns, now) {
+  const today = dayOf(now);
+  const first = burns.length ? dayOf(burns[0].start) : today;
+  let from, unit;
+  if (range === "week") { from = addDays(today, -6); unit = "day"; }
+  else if (range === "month") { from = addDays(today, -29); unit = "day"; }
+  else if (range === "year") { from = new Date(today.getFullYear(), today.getMonth() - 11, 1); unit = "month"; }
+  else {
+    const span = Math.round((today - first) / DAY) + 1;
+    unit = span <= 31 ? "day" : span <= 26 * 7 ? "week" : "month";
+    from = unit === "day" ? (span < 7 ? addDays(today, -6) : first) : unit === "week" ? mondayOf(first) : new Date(first.getFullYear(), first.getMonth(), 1);
+  }
+
+  const a = secOf(from);
+  const inRange = burns.map((x) => ({ ...x, s: Math.max(x.start, a), e: Math.min(x.end, now) })).filter((x) => x.e > x.s);
+  const burned = (p, q) => inRange.reduce((sum, x) => sum + Math.max(0, Math.min(x.e, q) - Math.max(x.s, p)), 0);
+
+  const buckets = [];
+  for (let d = from; d <= today;) {
+    const next = unit === "day" ? addDays(d, 1) : unit === "week" ? addDays(d, 7) : new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    let label, tip;
+    if (unit === "day") {
+      label = range === "week" ? weekdayName((d.getDay() + 6) % 7) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      tip = dayLabel(d);
+    } else if (unit === "week") {
+      label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      tip = `Week of ${dateFmt(d, { month: "short", day: "numeric" })}`;
+    } else {
+      label = d.getMonth() ? d.toLocaleDateString(undefined, { month: "short" }) : String(d.getFullYear());
+      tip = d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    }
+    buckets.push({ sec: burned(secOf(d), secOf(next)), label, tip });
+    d = next;
+  }
+
+  // Burned time per weekday (Monday first) and hour, split at each hour boundary.
+  const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  for (const x of inRange) {
+    for (let t = x.s; t < x.e;) {
+      const at = new Date(t * 1000);
+      const next = new Date(at);
+      next.setMinutes(60, 0, 0);
+      const end = Math.min(x.e, secOf(next));
+      grid[(at.getDay() + 6) % 7][at.getHours()] += end - t;
+      t = end;
+    }
+  }
+
+  // Days in a row with any burn, up to today (or yesterday, if today hasn't had one yet).
+  const burnedDays = new Set();
+  for (const x of burns) for (let d = dayOf(x.start); secOf(d) < x.end; d = addDays(d, 1)) burnedDays.add(isoDate(d));
+  let streak = 0;
+  for (let d = burnedDays.has(isoDate(today)) ? today : addDays(today, -1); burnedDays.has(isoDate(d)); d = addDays(d, -1)) streak++;
+
+  const total = burned(a, now + 1);
+  const days = Math.round((today - (first > from ? first : from)) / DAY) + 1;
+  const span = range === "week" ? "in the last 7 days" : range === "month" ? "in the last 30 days" : range === "year" ? "in the last 12 months"
+    : `since ${first.toLocaleDateString(undefined, { month: "long", day: "numeric", ...(first.getFullYear() !== today.getFullYear() && { year: "numeric" }) })}`;
+  return { unit, buckets, grid, streak, total, days, span, list: inRange };
+}
+
+/* ---- charts: plain SVG, drawn at the box's real width so text stays crisp */
+
+const NICE_MIN = [5, 10, 15, 30, 60, 120, 180, 240, 300, 360, 480, 600, 720, 900, 1200, 1500, 1800, 2400, 3000, 3600, 6000, 12000, 30000, 60000];
+
+function barPath(x, base, w, h) {
+  const r = Math.min(4, w / 2, h);
+  return `M${x},${base}V${base - h + r}Q${x},${base - h} ${x + r},${base - h}H${x + w - r}Q${x + w},${base - h} ${x + w},${base - h + r}V${base}Z`;
+}
+
+function barsSvg(buckets, goal, W, title) {
+  const H = 168, top = 8, gutter = 34, base = H - 22, plotW = W - gutter;
+  const maxMin = Math.max(60, goal / 60, ...buckets.map((b) => b.sec / 60));
+  const step = NICE_MIN.find((n) => maxMin / n <= 3) || NICE_MIN[NICE_MIN.length - 1];
+  const yMax = Math.ceil(maxMin / step) * step * 60;
+  const y = (sec) => base - (sec / yMax) * (base - top);
+  let out = "";
+  for (let v = step * 60; v <= yMax; v += step * 60) {
+    out += `<line class="grid" x1="0" x2="${plotW}" y1="${y(v)}" y2="${y(v)}"/>`;
+    if (!goal || Math.abs(y(v) - y(goal)) > 12) out += `<text x="${W}" y="${y(v) + 3.5}" text-anchor="end">${fmtTotal(v)}</text>`;
+  }
+  out += `<line class="base" x1="0" x2="${plotW}" y1="${base}" y2="${base}"/>`;
+  const slot = plotW / buckets.length;
+  const bw = Math.min(24, Math.max(2, slot - Math.max(2, slot * 0.35)));
+  buckets.forEach((b, i) => {
+    const h = b.sec ? Math.max(2, base - y(b.sec)) : 0;
+    out += `<g class="mark" data-tip="${esc(fmtTotal(b.sec))}" data-sub="${esc(b.tip)}"><rect class="hit" x="${i * slot}" y="${top}" width="${slot}" height="${base - top}"/>`;
+    if (h) out += `<path class="bar${goal && b.sec >= goal ? " met" : ""}" d="${barPath(i * slot + (slot - bw) / 2, base, bw, h)}"/>`;
+    out += "</g>";
+  });
+  if (goal) out += `<line class="goal" x1="0" x2="${plotW}" y1="${y(goal)}" y2="${y(goal)}"/><text x="${W}" y="${y(goal) + 3.5}" text-anchor="end">goal</text>`;
+  // Label as many buckets as fit, always including the latest.
+  const lw = Math.max(...buckets.map((b) => b.label.length)) * 6.2 + 8;
+  const every = Math.max(1, Math.ceil(lw / slot));
+  for (let i = buckets.length - 1; i >= 0; i -= every) {
+    const cx = i * slot + slot / 2;
+    const [x, anchor] = cx - lw / 2 < 0 ? [Math.max(0, cx - slot / 2), "start"] : cx + lw / 2 > W ? [W, "end"] : [cx, "middle"];
+    out += `<text x="${x}" y="${H - 5}" text-anchor="${anchor}">${esc(buckets[i].label)}</text>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(title)}">${out}</svg>`;
+}
+
+function heatSvg(grid, W) {
+  const left = 16, cw = (W - left) / 24, rh = Math.max(15, Math.min(22, cw)), H = rh * 7 + 18;
+  const max = Math.max(...grid.flat());
+  let out = "";
+  grid.forEach((row, r) => {
+    out += `<text x="0" y="${r * rh + rh / 2 + 3.5}">${DAY_LETTERS[r]}</text>`;
+    row.forEach((v, h) => {
+      const level = v ? Math.ceil((v / max) * 4) : 0;
+      out += `<rect class="cell l${level}" x="${left + h * cw + 1}" y="${r * rh + 1}" width="${cw - 2}" height="${rh - 2}" rx="2" data-tip="${esc(fmtTotal(v))}" data-sub="${esc(`${weekdayName(r)}, ${fmtHour(h)}`)}"/>`;
+    });
+  });
+  for (const h of [0, 6, 12, 18]) out += `<text x="${left + h * cw + 1}" y="${H - 4}">${esc(fmtHour(h))}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="When you burn, by weekday and hour">${out}</svg>`;
+}
+
+function renderStats() {
+  $$("#st-range button").forEach((b) => b.classList.toggle("on", b.dataset.range === state.range));
+  if (!burnsData) return;
+  const { burns, now } = burnsData;
+  $("#st-empty").hidden = burns.length > 0;
+  $("#stats").hidden = burns.length === 0;
+  if (!burns.length || $("#st-bars").clientWidth < 120) return; // not laid out yet
+  hideTip();
+  const st = crunch(state.range, burns, now);
+
+  $("#st-total").textContent = fmtTotal(st.total);
+  $("#st-span").textContent = st.span;
+  $("#st-avg").textContent = fmtDuration(st.total / st.days);
+  $("#st-count").textContent = st.list.length;
+  $("#st-count-label").textContent = st.list.length === 1 ? "burn" : "burns";
+  $("#st-streak").textContent = st.streak;
+
+  const goals = (state.settings && state.settings.goals) || {};
+  const goal = st.unit === "day" ? goals.daily * 60 : st.unit === "week" ? goals.weekly * 60 : 0;
+  const title = { day: "Per day", week: "Per week", month: "Per month" }[st.unit];
+  $("#st-bars-title").textContent = title;
+  $("#st-bars").innerHTML = barsSvg(st.buckets, goal || 0, $("#st-bars").clientWidth, `Burned ${title.toLowerCase()}`);
+  $("#st-heat").innerHTML = heatSvg(st.grid, $("#st-heat").clientWidth);
+
+  const byHour = st.grid[0].map((_, h) => st.grid.reduce((sum, row) => sum + row[h], 0));
+  const byDay = st.grid.map((row) => row.reduce((sum, v) => sum + v, 0));
+  const peak = (arr) => arr.indexOf(Math.max(...arr));
+  $("#st-peak").textContent = st.total ? `Peak ${fmtHour(peak(byHour))} · ${weekdayName(peak(byDay), "long")}s` : "";
+
+  // The log doubles as the table behind the charts: every burn, newest first.
+  const rows = st.list.slice().reverse();
+  let lastDay = "";
+  $("#st-log").innerHTML = rows.slice(0, logShown).map((x) => {
+    const d = dayOf(x.start);
+    const day = isoDate(d) === lastDay ? "" : dayLabel(d);
+    lastDay = isoDate(d);
+    const time = x.live ? `${timeRange.format(new Date(x.start * 1000))} – now` : timeRange.formatRange(new Date(x.start * 1000), new Date(x.end * 1000));
+    return `<li class="${x.live ? "live" : ""}"><span class="d">${esc(day)}</span><span class="t">${esc(time)}${x.early ? "<small>ended early</small>" : ""}</span><span class="len">${fmtDuration(x.end - x.start)}</span></li>`;
+  }).join("");
+  $("#st-more").hidden = rows.length <= logShown;
+}
+
+$$("#st-range button").forEach((b) => b.onclick = () => {
+  state.range = b.dataset.range;
+  ls.setItem("ignition.range", state.range);
+  logShown = 12;
+  renderStats();
+});
+$("#st-more").onclick = () => { logShown += 30; renderStats(); };
+
+let statsWidth = 0;
+window.addEventListener("resize", () => {
+  const w = $("#st-bars").clientWidth;
+  if (state.page === "stats" && w !== statsWidth) { statsWidth = w; renderStats(); }
+});
+
+/* ---- tooltip: hover on a computer, tap on a phone */
+
+const tip = $("#chart-tip");
+let tipMark = null;
+
+function showTip(mark) {
+  if (tipMark) tipMark.classList.remove("hot");
+  tipMark = mark;
+  mark.classList.add("hot");
+  const b = document.createElement("b");
+  b.textContent = mark.dataset.tip;
+  const span = document.createElement("span");
+  span.textContent = mark.dataset.sub;
+  tip.replaceChildren(b, span);
+  tip.hidden = false;
+  const r = mark.getBoundingClientRect();
+  const half = tip.offsetWidth / 2;
+  const below = r.top - tip.offsetHeight - 8 < 0;
+  tip.classList.toggle("below", below);
+  tip.style.left = `${Math.min(window.innerWidth - half - 8, Math.max(half + 8, r.left + r.width / 2))}px`;
+  tip.style.top = `${below ? r.bottom + 8 : r.top - 8}px`;
+}
+
+function hideTip() {
+  tip.hidden = true;
+  if (tipMark) tipMark.classList.remove("hot");
+  tipMark = null;
+}
+
+for (const el of [$("#st-bars"), $("#st-heat")]) {
+  el.addEventListener("pointerover", (e) => { const m = e.target.closest("[data-tip]"); if (m) showTip(m); });
+  el.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hideTip(); });
+}
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".chart")) hideTip(); });
+window.addEventListener("scroll", hideTip, { passive: true });
+
 /* ---------------- routing & lifecycle ---------------- */
 
-// Ignite is home: the app opens on the button, and the lists sit behind it.
+const TABS = ["ignite", "need", "want", "stats"];
+
+// Ignite is home: the app opens on the button, and the lists sit behind it. Settings is a page of its
+// own (#settings/<section>) that goes back to whichever tab you came from.
 function route() {
-  const page = ["ignite", "need", "want"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "ignite";
+  const [hash] = location.hash.slice(1).split("/");
+  const page = [...TABS, "settings"].includes(hash) ? hash : "ignite";
+  const was = state.page;
   state.page = page;
+  if (TABS.includes(page)) state.lastTab = page;
   if (addDialog.open) addDialog.close();
   closeSortMenu();
+  hideTip();
   $$(".page").forEach((p) => { p.hidden = p.id !== `page-${page}`; });
   $$(".tabs a").forEach((a) => a.classList.toggle("active", a.dataset.tab === page));
-  $("#fab").hidden = page === "ignite";
+  $("#settings-btn").classList.toggle("active", page === "settings");
+  $("#fab").hidden = page !== "need" && page !== "want";
   $("#fab").setAttribute("aria-label", page === "want" ? "Add something you want to do" : "Add something that needs doing");
+  if (was !== page) window.scrollTo(0, 0);
+  if (was === "settings" && page !== "settings") flushSettings();
+  if (page === "settings") {
+    if (was !== "settings" || !settingsDoc) openSettings().then(() => { if (state.page === "settings") goSettings(settingsSub()); });
+    goSettings(settingsSub());
+  }
+  if (page === "stats") { renderStats(); loadBurns(); }
 }
 
 // Hooks for the Android app.
-window.ignitionRefresh = () => { loadItems(); loadIgnite(); if (settingsDialog.open && NATIVE) loadAppInfo(); else loadSettings(); };
+window.ignitionRefresh = () => {
+  loadItems(); loadIgnite(); loadSettings();
+  if (state.page === "settings" && NATIVE) loadAppInfo();
+  if (state.page === "stats") loadBurns();
+};
 window.ignitionBack = () => {
   if (!$("#sort-menu").hidden) { closeSortMenu(); return true; }
-  if (settingsDialog.open) { if (!settingsBack()) closeSettings(); return true; }
   for (const d of [addDialog, mecoDialog]) if (d.open) { d.close(); return true; }
+  if (state.page === "settings") { settingsBack(); return true; }
   if (state.page !== "ignite") { location.hash = "ignite"; return true; }
   return false;
 };
 
 window.addEventListener("hashchange", route);
 document.addEventListener("keydown", (e) => {
-  if (addDialog.open || settingsDialog.open || mecoDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (addDialog.open || mecoDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
   if (e.key === "n" || e.key === "+" || e.key === "a") { e.preventDefault(); openAdd(); }
   if (e.key === "1") location.hash = "ignite";
   if (e.key === "2") location.hash = "need";
   if (e.key === "3") location.hash = "want";
+  if (e.key === "4") location.hash = "stats";
+  if (e.key === ",") location.hash = "settings";
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) { loadItems(); loadIgnite(); loadSettings(); }
+  if (document.hidden) { flushSettings(); return; }
+  loadItems(); loadIgnite(); loadSettings();
+  if (state.page === "stats") loadBurns();
 });
 
 paintSortButtons();
@@ -1123,6 +1411,7 @@ loadIgnite();
 loadSettings();
 setInterval(() => { if (!document.hidden) loadIgnite(); }, 5000);
 setInterval(() => { if (!document.hidden && !addDialog.open) loadItems(); }, 30000);
+setInterval(() => { if (!document.hidden && state.page === "stats") loadBurns(); }, 30000);
 setInterval(() => {
   const { phase, session } = state.ignite;
   if (phase !== "idle" || arming) renderIgnite();

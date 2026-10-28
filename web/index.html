@@ -24,10 +24,11 @@
       <a href="#ignite" data-tab="ignite"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M10 2h4"/></svg><span id="tab-ignite-label">Ignite</span></a>
       <a href="#need" data-tab="need"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Need</span></a>
       <a href="#want" data-tab="want"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><span>Want</span></a>
+      <a href="#stats" data-tab="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-7M12 20V5M19 20v-10"/></svg><span>Stats</span></a>
     </nav>
-    <button class="icon-btn" id="settings-btn" type="button" aria-label="Settings">
+    <a class="icon-btn" id="settings-btn" href="#settings" aria-label="Settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-    </button>
+    </a>
   </header>
 
   <main>
@@ -122,6 +123,140 @@
         <ul class="items done"></ul>
       </details>
     </section>
+
+    <section id="page-stats" class="page" hidden>
+      <div class="page-head">
+        <h1>Stats</h1>
+        <div class="seg range" id="st-range" role="group" aria-label="Range">
+          <button type="button" data-range="week">Week</button>
+          <button type="button" data-range="month">Month</button>
+          <button type="button" data-range="year">Year</button>
+          <button type="button" data-range="all">All</button>
+        </div>
+      </div>
+      <div class="stats" id="stats" hidden>
+        <div class="hero"><span class="hero-val" id="st-total"></span><span class="hero-sub" id="st-span"></span></div>
+        <div class="kpis">
+          <div><b id="st-avg"></b><span>a day</span></div>
+          <div><b id="st-count"></b><span id="st-count-label">burns</span></div>
+          <div><b id="st-streak"></b><span>day streak</span></div>
+        </div>
+        <h2 class="st-h"><span id="st-bars-title">Per day</span></h2>
+        <div class="chart" id="st-bars"></div>
+        <h2 class="st-h"><span>When</span><span class="st-note" id="st-peak"></span></h2>
+        <div class="chart" id="st-heat"></div>
+        <h2 class="st-h"><span>Burns</span></h2>
+        <ul class="burn-log" id="st-log"></ul>
+        <button type="button" class="ghost small st-more" id="st-more" hidden>Show more</button>
+      </div>
+      <p class="empty" id="st-empty" hidden>Nothing burned yet.</p>
+    </section>
+
+    <section id="page-settings" class="page settings at-home" hidden>
+      <div class="page-head settings-head">
+        <a class="icon-btn" id="settings-back" href="#settings" aria-label="Back" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        </a>
+        <h1 id="settings-title">Settings</h1>
+      </div>
+      <div class="set-layout">
+        <nav class="set-home" aria-label="Settings">
+          <a class="set-link" href="#settings/goals" data-go="goals"><span>Burn goals</span><span class="set-sum" id="sum-goals"></span></a>
+          <a class="set-link" href="#settings/launches" data-go="launches"><span>Scheduled launches</span><span class="set-sum" id="sum-launches"></span></a>
+          <a class="set-link" href="#settings/window" data-go="window"><span>Launch window</span><span class="set-sum" id="sum-window"></span></a>
+          <a class="set-link" href="#settings/blocking" data-go="blocking"><span>Blocking</span><span class="set-sum" id="sum-blocking"></span></a>
+          <a class="set-link app-only" href="#settings/phone" data-go="phone"><span>Phone</span><span class="set-sum" id="sum-phone"></span></a>
+          <a class="set-link app-only" href="#settings/sync" data-go="sync"><span>Sync</span><span class="set-sum" id="sum-sync"></span></a>
+        </nav>
+        <div class="set-body">
+          <section class="set-page" data-page="goals" data-title="Burn goals" hidden>
+            <p class="hint">Shown as progress bars on the Ignite page.</p>
+            <div class="set-row"><label for="goal-daily">Daily</label><input id="goal-daily" type="number" inputmode="numeric" min="0" placeholder="0"><span>min</span></div>
+            <div class="set-row"><label for="goal-weekly">Weekly</label><input id="goal-weekly" type="number" inputmode="numeric" min="0" placeholder="0"><span>hours</span></div>
+          </section>
+
+          <section class="set-page" data-page="launches" data-title="Scheduled launches" hidden>
+            <p class="hint">Ignites by itself at these times. You get a T-minus warning first and can scrub it.</p>
+            <ul class="schedules" id="schedules"></ul>
+            <button type="button" class="ghost small" id="add-schedule">+ Add a launch</button>
+          </section>
+
+          <section class="set-page" data-page="window" data-title="Launch window" hidden>
+            <p class="hint">A nudge, not a lock. If you haven't started anything a while after getting home, your phone asks if you want to start a T-minus.</p>
+            <div class="toggle-row"><span>Nudge me</span><label class="switch" aria-label="Launch window on"><input type="checkbox" id="lw-on"><i></i></label></div>
+            <div class="lw-body" id="lw-body">
+              <div class="sched-days" id="lw-days"></div>
+              <div class="set-row"><label for="lw-start">Between</label><input type="time" id="lw-start"><span>and</span><input type="time" id="lw-end"></div>
+              <div class="set-row"><label for="lw-after">Nudge</label><input type="number" id="lw-after" inputmode="numeric" min="0" max="240"><span>min after</span></div>
+              <div class="seg lw-trigger" id="lw-trigger">
+                <button type="button" data-trigger="home">I get home</button>
+                <button type="button" data-trigger="time">the window opens</button>
+              </div>
+              <div class="lw-home" id="lw-home" hidden>
+                <p class="hint" id="lw-home-text"></p>
+                <button type="button" class="ghost small app-only" id="lw-home-set">Use the Wi-Fi I'm on now</button>
+              </div>
+              <p class="hint lw-start-hint">The nudge's start button launches:</p>
+              <div class="set-row"><label for="lw-tminus">T-minus</label><input type="number" id="lw-tminus" inputmode="numeric" min="0" max="120"><span>min, then</span></div>
+              <div class="set-row"><label for="lw-minutes">Burn</label><input type="number" id="lw-minutes" inputmode="numeric" min="1" max="720"><span>min</span></div>
+            </div>
+          </section>
+
+          <section class="set-page" data-page="blocking" data-title="Blocking" hidden>
+            <h3>Websites</h3>
+            <p class="hint">Subdomains count too. Blocked in every browser on your phone, and on computers running the enforcer.</p>
+            <ul class="tag-list" id="block-sites"></ul>
+            <form class="tag-add" id="block-sites-add"><input placeholder="add a site, e.g. example.com" autocapitalize="off" spellcheck="false" inputmode="url"><button type="submit" class="ghost small">Add</button></form>
+
+            <h3>Phone apps</h3>
+            <div class="toggle-row"><span>Every game<span class="hint inline">anything Android files as a game, even hidden ones</span></span><label class="switch" aria-label="Block every game"><input type="checkbox" id="block-games"><i></i></label></div>
+            <ul class="tag-list" id="block-apps"></ul>
+            <button type="button" class="ghost small app-only" id="block-apps-pick">+ Choose apps</button>
+            <form class="tag-add web-only" id="block-apps-add"><input placeholder="package name, e.g. com.reddit.frontpage" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost small">Add</button></form>
+            <p class="hint" id="blocker-hint" hidden></p>
+
+            <h3>Programs on computers</h3>
+            <p class="hint">Killed, along with anything they started, if they're launched during a burn.</p>
+            <ul class="tag-list" id="block-programs"></ul>
+            <form class="tag-add" id="block-programs-add"><input placeholder="add a program, e.g. steam" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost small">Add</button></form>
+          </section>
+
+          <section class="set-page" data-page="apps" data-title="Choose apps" hidden>
+            <input class="app-search" id="app-search" placeholder="Search apps" autocapitalize="off" spellcheck="false">
+            <ul class="app-pick" id="app-pick"></ul>
+          </section>
+
+          <section class="set-page" data-page="phone" data-title="Phone" hidden>
+            <div class="toggle-row"><span>Notifications</span><button type="button" class="ghost small" id="notif-btn">Allow</button></div>
+            <div class="toggle-row"><span>App &amp; site blocker<span class="hint inline" id="blocker-state"></span></span><button type="button" class="ghost small" id="blocker-btn">Turn on</button></div>
+            <div class="toggle-row"><span>Ring when a T-minus lifts off<span class="hint inline">wakes the screen with a short sound</span></span><label class="switch" aria-label="Ring at liftoff"><input type="checkbox" id="ring-toggle"><i></i></label></div>
+            <div class="toggle-row" id="ring-sound-row" hidden>
+              <div class="seg" id="ring-sound">
+                <button type="button" data-sound="rocket">Rocket</button>
+                <button type="button" data-sound="buzz">Buzz</button>
+                <button type="button" data-sound="ringtone">Ringtone</button>
+              </div>
+              <button type="button" class="ghost small" id="ring-test">Test</button>
+            </div>
+            <p class="hint" id="ring-hint"></p>
+            <div class="toggle-row"><span>Do Not Disturb while burning</span><label class="switch" aria-label="Do Not Disturb while burning"><input type="checkbox" id="dnd-toggle"><i></i></label></div>
+            <p class="hint" id="dnd-hint"></p>
+            <details class="tasker">
+              <summary>Tasker &amp; automation</summary>
+              <p class="hint">Ignition broadcasts these intents (use Tasker's <em>Intent Received</em> event):</p>
+              <code>ca.heeney.ignition.COUNTDOWN<br>ca.heeney.ignition.LIFTOFF<br>ca.heeney.ignition.MECO</code>
+              <p class="hint">Extras: <code>minutes</code>, <code>starts_at</code>, <code>ends_at</code> (unix seconds), <code>source</code>. To ignite from Tasker, send broadcast <code>ca.heeney.ignition.IGNITE</code> (package <code>ca.heeney.ignition</code>) with extras <code>minutes</code> and optional <code>delay</code>.</p>
+            </details>
+          </section>
+
+          <section class="set-page" data-page="sync" data-title="Sync" hidden>
+            <p class="hint">Optional. Point this at an ignition server to share lists, burns and settings with your other devices.</p>
+            <div class="set-row wide"><input id="server-url" type="url" inputmode="url" placeholder="http://my-server:8445" autocapitalize="off" spellcheck="false"></div>
+            <div class="set-row wide"><button type="button" class="ghost small" id="server-test">Test &amp; save</button><span class="hint" id="sync-status"></span></div>
+          </section>
+        </div>
+      </div>
+    </section>
   </main>
 
   <button class="fab" id="fab" type="button" aria-label="Add">
@@ -164,120 +299,8 @@
     </div>
   </dialog>
 
-  <dialog id="settings-dialog" class="sheet tall">
-    <div class="sheet-grip" aria-hidden="true"></div>
-    <div class="settings-head">
-      <button type="button" class="icon-btn" id="settings-back" aria-label="Back" hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
-      </button>
-      <h2 id="settings-title">Settings</h2>
-      <button type="button" class="icon-btn" id="settings-close" aria-label="Close">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
-    </div>
-
-    <nav class="set-page set-home" data-page="home">
-      <button type="button" class="set-link" data-go="goals"><span>Burn goals</span><span class="set-sum" id="sum-goals"></span></button>
-      <button type="button" class="set-link" data-go="launches"><span>Scheduled launches</span><span class="set-sum" id="sum-launches"></span></button>
-      <button type="button" class="set-link" data-go="window"><span>Launch window</span><span class="set-sum" id="sum-window"></span></button>
-      <button type="button" class="set-link" data-go="blocking"><span>Blocking</span><span class="set-sum" id="sum-blocking"></span></button>
-      <button type="button" class="set-link app-only" data-go="phone"><span>Phone</span><span class="set-sum" id="sum-phone"></span></button>
-      <button type="button" class="set-link app-only" data-go="sync"><span>Sync</span><span class="set-sum" id="sum-sync"></span></button>
-    </nav>
-
-    <section class="set-page" data-page="goals" data-title="Burn goals" hidden>
-      <p class="hint">Shown as progress bars on the Ignite page.</p>
-      <div class="set-row"><label for="goal-daily">Daily</label><input id="goal-daily" type="number" inputmode="numeric" min="0" placeholder="0"><span>min</span></div>
-      <div class="set-row"><label for="goal-weekly">Weekly</label><input id="goal-weekly" type="number" inputmode="numeric" min="0" placeholder="0"><span>hours</span></div>
-    </section>
-
-    <section class="set-page" data-page="launches" data-title="Scheduled launches" hidden>
-      <p class="hint">Ignites by itself at these times. You get a T-minus warning first and can scrub it.</p>
-      <ul class="schedules" id="schedules"></ul>
-      <button type="button" class="ghost small" id="add-schedule">+ Add a launch</button>
-    </section>
-
-    <section class="set-page" data-page="window" data-title="Launch window" hidden>
-      <p class="hint">A nudge, not a lock. If you haven't started anything a while after getting home, your phone asks if you want to start a T-minus.</p>
-      <div class="toggle-row"><span>Nudge me</span><label class="switch" aria-label="Launch window on"><input type="checkbox" id="lw-on"><i></i></label></div>
-      <div class="lw-body" id="lw-body">
-        <div class="sched-days" id="lw-days"></div>
-        <div class="set-row"><label for="lw-start">Between</label><input type="time" id="lw-start"><span>and</span><input type="time" id="lw-end"></div>
-        <div class="set-row"><label for="lw-after">Nudge</label><input type="number" id="lw-after" inputmode="numeric" min="0" max="240"><span>min after</span></div>
-        <div class="seg lw-trigger" id="lw-trigger">
-          <button type="button" data-trigger="home">I get home</button>
-          <button type="button" data-trigger="time">the window opens</button>
-        </div>
-        <div class="lw-home" id="lw-home" hidden>
-          <p class="hint" id="lw-home-text"></p>
-          <button type="button" class="ghost small app-only" id="lw-home-set">Use the Wi-Fi I'm on now</button>
-        </div>
-        <p class="hint lw-start-hint">The nudge's start button launches:</p>
-        <div class="set-row"><label for="lw-tminus">T-minus</label><input type="number" id="lw-tminus" inputmode="numeric" min="0" max="120"><span>min, then</span></div>
-        <div class="set-row"><label for="lw-minutes">Burn</label><input type="number" id="lw-minutes" inputmode="numeric" min="1" max="720"><span>min</span></div>
-      </div>
-    </section>
-
-    <section class="set-page" data-page="blocking" data-title="Blocking" hidden>
-      <h3>Websites</h3>
-      <p class="hint">Subdomains count too. Blocked in every browser on your phone, and on computers running the enforcer.</p>
-      <ul class="tag-list" id="block-sites"></ul>
-      <form class="tag-add" id="block-sites-add"><input placeholder="add a site, e.g. example.com" autocapitalize="off" spellcheck="false" inputmode="url"><button type="submit" class="ghost small">Add</button></form>
-
-      <h3>Phone apps</h3>
-      <div class="toggle-row"><span>Every game<span class="hint inline">anything Android files as a game, even hidden ones</span></span><label class="switch" aria-label="Block every game"><input type="checkbox" id="block-games"><i></i></label></div>
-      <ul class="tag-list" id="block-apps"></ul>
-      <button type="button" class="ghost small app-only" id="block-apps-pick">+ Choose apps</button>
-      <form class="tag-add web-only" id="block-apps-add"><input placeholder="package name, e.g. com.reddit.frontpage" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost small">Add</button></form>
-      <p class="hint" id="blocker-hint" hidden></p>
-
-      <h3>Programs on computers</h3>
-      <p class="hint">Killed, along with anything they started, if they're launched during a burn.</p>
-      <ul class="tag-list" id="block-programs"></ul>
-      <form class="tag-add" id="block-programs-add"><input placeholder="add a program, e.g. steam" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost small">Add</button></form>
-    </section>
-
-    <section class="set-page" data-page="apps" data-title="Choose apps" hidden>
-      <input class="app-search" id="app-search" placeholder="Search apps" autocapitalize="off" spellcheck="false">
-      <ul class="app-pick" id="app-pick"></ul>
-    </section>
-
-    <section class="set-page" data-page="phone" data-title="Phone" hidden>
-      <div class="toggle-row"><span>Notifications</span><button type="button" class="ghost small" id="notif-btn">Allow</button></div>
-      <div class="toggle-row"><span>App &amp; site blocker<span class="hint inline" id="blocker-state"></span></span><button type="button" class="ghost small" id="blocker-btn">Turn on</button></div>
-      <div class="toggle-row"><span>Ring when a T-minus lifts off<span class="hint inline">wakes the screen with a short sound</span></span><label class="switch" aria-label="Ring at liftoff"><input type="checkbox" id="ring-toggle"><i></i></label></div>
-      <div class="toggle-row" id="ring-sound-row" hidden>
-        <div class="seg" id="ring-sound">
-          <button type="button" data-sound="rocket">Rocket</button>
-          <button type="button" data-sound="buzz">Buzz</button>
-          <button type="button" data-sound="ringtone">Ringtone</button>
-        </div>
-        <button type="button" class="ghost small" id="ring-test">Test</button>
-      </div>
-      <p class="hint" id="ring-hint"></p>
-      <div class="toggle-row"><span>Do Not Disturb while burning</span><label class="switch" aria-label="Do Not Disturb while burning"><input type="checkbox" id="dnd-toggle"><i></i></label></div>
-      <p class="hint" id="dnd-hint"></p>
-      <details class="tasker">
-        <summary>Tasker &amp; automation</summary>
-        <p class="hint">Ignition broadcasts these intents (use Tasker's <em>Intent Received</em> event):</p>
-        <code>ca.heeney.ignition.COUNTDOWN<br>ca.heeney.ignition.LIFTOFF<br>ca.heeney.ignition.MECO</code>
-        <p class="hint">Extras: <code>minutes</code>, <code>starts_at</code>, <code>ends_at</code> (unix seconds), <code>source</code>. To ignite from Tasker, send broadcast <code>ca.heeney.ignition.IGNITE</code> (package <code>ca.heeney.ignition</code>) with extras <code>minutes</code> and optional <code>delay</code>.</p>
-      </details>
-    </section>
-
-    <section class="set-page" data-page="sync" data-title="Sync" hidden>
-      <p class="hint">Optional. Point this at an ignition server to share lists, burns and settings with your other devices.</p>
-      <div class="set-row wide"><input id="server-url" type="url" inputmode="url" placeholder="http://my-server:8445" autocapitalize="off" spellcheck="false"></div>
-      <div class="set-row wide"><button type="button" class="ghost small" id="server-test">Test &amp; save</button><span class="hint" id="sync-status"></span></div>
-    </section>
-
-    <div class="sheet-actions">
-      <span class="hint" id="settings-msg"></span>
-      <button type="button" class="primary" id="settings-save">Save</button>
-    </div>
-  </dialog>
-
   <div class="toast" id="toast" role="status" hidden></div>
+  <div class="chart-tip" id="chart-tip" role="status" hidden></div>
 
   <template id="tpl-fields">
     <div class="field" data-field="estimate_min">

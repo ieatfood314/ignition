@@ -95,7 +95,7 @@ class NextUpWidget : BaseWidget() {
 }
 
 class BurnWidget : BaseWidget() {
-    override val page = "ignite"
+    override val page = "stats"
     override fun draw(context: Context, r: WidgetRenderer, widthDp: Float, heightDp: Float): WidgetRenderer.Layers {
         val store = Store.get(context)
         return r.burn(widthDp, heightDp, synchronized(store) { Logic.stats(store) })

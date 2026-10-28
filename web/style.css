@@ -352,12 +352,6 @@ dialog.sheet[open] { animation: pop .18s ease-out; }
 .window-note span { color: var(--faint); }
 
 /* ---------- v2: settings ---------- */
-dialog.sheet.tall { max-height: 88dvh; overflow-y: auto; }
-.settings-head { display: flex; align-items: center; justify-content: space-between; }
-.settings-head h2 { margin: 0; font-size: 21px; }
-.set-group { margin-top: 22px; }
-.set-group h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--faint); font-weight: 650; margin: 0 0 10px; }
-.set-group h3:not(:first-child) { margin-top: 22px; }
 .hint { color: var(--faint); font-size: 13px; line-height: 1.45; margin: 0 0 10px; }
 .set-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; color: var(--muted); font-size: 14px; }
 .set-row label { width: 70px; }
@@ -397,7 +391,6 @@ dialog.sheet.tall { max-height: 88dvh; overflow-y: auto; }
 .tasker summary { color: var(--muted); font-size: 14px; cursor: pointer; padding: 6px 0; }
 .tasker code { display: block; font-size: 12.5px; color: var(--text); background: var(--surface-2); border-radius: 8px; padding: 8px 10px; margin: 0 0 10px; overflow-wrap: anywhere; }
 .tasker p code { display: inline; padding: 1px 5px; }
-.sheet-actions .hint { margin: 0 auto 0 0; align-self: center; }
 
 @media (max-width: 720px) {
   .top .icon-btn { margin-left: auto; }
@@ -407,27 +400,24 @@ dialog.sheet.tall { max-height: 88dvh; overflow-y: auto; }
 /* In the Android app the shell handles system bars and there is no browser chrome. */
 .in-app .top { padding-top: 14px; }
 .ghost.small { white-space: nowrap; }
-dialog.sheet.tall .sheet-actions { position: sticky; bottom: -22px; margin: 20px -22px -22px; padding: 14px 22px; background: var(--surface); border-top: 1px solid var(--line); }
-@media (max-width: 720px) {
-  dialog.sheet.tall .sheet-actions { bottom: calc(-18px - var(--safe-b)); margin: 20px -18px calc(-18px - var(--safe-b)); padding: 12px 18px calc(12px + var(--safe-b)); }
-}
 
-/* ---------- v3: settings pages ---------- */
+/* ---------- v3: settings page ---------- */
 .in-web .app-only, .in-app .web-only { display: none !important; }
-.settings-head { gap: 6px; }
-.settings-head h2 { flex: 1; }
-#settings-back { margin-left: -8px; }
-.set-home { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 14px; }
+.settings-head { align-items: center; gap: 4px; }
+#settings-back { margin-left: -10px; }
+/* Wider screens: the sections down the left, the open one beside them. */
+.set-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 40px; align-items: start; }
+.set-home { position: sticky; top: 76px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .set-link {
-  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
-  background: none; border: 0; border-bottom: 1px solid var(--line); padding: 15px 2px; font-size: 16px;
+  display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-radius: 10px;
+  color: var(--muted); text-decoration: none; font-size: 15px; font-weight: 550;
 }
-.set-link:last-child { border-bottom: 0; }
-.set-link::after { content: "›"; color: var(--faint); font-size: 20px; line-height: 1; }
+.set-link:hover { color: var(--text); }
+.set-link[aria-current] { color: var(--text); background: var(--surface-2); }
 .set-link > span:first-child { flex: none; }
-.set-sum { flex: 1; min-width: 0; text-align: right; color: var(--faint); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-sum { display: none; flex: 1; min-width: 0; text-align: right; color: var(--faint); font-size: 13.5px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .set-sum.warn { color: var(--accent); }
-.set-page:not(.set-home) { margin-top: 16px; }
+.set-body { max-width: 540px; padding-top: 6px; }
 .set-page h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--faint); font-weight: 650; margin: 24px 0 8px; }
 .set-page h3:first-child { margin-top: 4px; }
 .hint.inline { display: block; margin: 2px 0 0; font-size: 12.5px; }
@@ -473,4 +463,77 @@ dialog.meco h2 { margin: 2px 0 6px; font-size: 26px; letter-spacing: -.01em; }
 .meco-chips { margin-top: 16px; }
 @media (max-width: 720px) {
   .lw-trigger, .lw-home { margin-left: 0; }
+  /* Phones drill down: the list of sections, or one section. */
+  .set-layout { display: block; }
+  .settings:not(.at-home) .set-home { display: none; }
+  .set-home { position: static; gap: 0; }
+  .set-link { padding: 15px 2px; border-radius: 0; border-bottom: 1px solid var(--line); color: var(--text); font-size: 16px; font-weight: 400; }
+  .set-link[aria-current] { background: none; }
+  .set-link::after { content: "›"; color: var(--faint); font-size: 20px; line-height: 1; }
+  .set-sum { display: block; }
+  .set-body { padding-top: 0; }
+}
+
+.top .icon-btn.active { color: var(--text); background: var(--surface-2); }
+@media (max-width: 720px) {
+  .top .icon-btn.active { color: var(--accent); background: transparent; }
+}
+
+/* ---------- stats ---------- */
+.page-head .range { margin-left: auto; align-self: center; flex-wrap: nowrap; gap: 4px; }
+.seg.range button { padding: 5px 11px; font-size: 13px; }
+.hero { margin: 6px 0 24px; }
+.hero-val { display: block; font-size: 60px; font-weight: 700; letter-spacing: -.035em; line-height: 1; }
+.hero-sub { display: block; margin-top: 10px; color: var(--muted); font-size: 14px; }
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.kpis b { display: block; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+.kpis span { color: var(--muted); font-size: 13px; }
+.st-h {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 36px 0 14px;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--faint); font-weight: 600;
+}
+.st-note { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 500; font-size: 13px; white-space: nowrap; }
+
+/* The app-wide svg rule strokes everything for line icons; charts opt back in per mark. */
+.chart svg { display: block; overflow: visible; fill: none; stroke: none; }
+.chart line { stroke-width: 1; }
+.chart text { fill: var(--faint); stroke: none; font-size: 10.5px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.chart .grid { stroke: var(--line); }
+.chart .base { stroke: var(--line-2); }
+.chart .goal { stroke: var(--accent); stroke-dasharray: 3 4; opacity: .7; pointer-events: none; }
+.chart .hit { fill: transparent; }
+.chart .bar { fill: #cfcfcf; transition: fill .12s; }
+.chart .bar.met { fill: var(--accent); }
+.chart .mark.hot .bar { fill: #fff; }
+.chart .mark.hot .bar.met { fill: #ff5a48; }
+.chart .mark.hot .hit { fill: rgba(255, 255, 255, .03); }
+.chart .cell { fill: var(--surface-2); }
+.chart .cell.l1 { fill: rgba(226, 58, 41, .28); }
+.chart .cell.l2 { fill: rgba(226, 58, 41, .5); }
+.chart .cell.l3 { fill: rgba(226, 58, 41, .75); }
+.chart .cell.l4 { fill: var(--accent); }
+.chart .cell.hot { stroke: var(--text); stroke-width: 1.5; }
+
+.chart-tip {
+  position: fixed; z-index: 50; transform: translate(-50%, -100%); pointer-events: none;
+  display: grid; gap: 1px; padding: 7px 11px; border-radius: 10px; white-space: nowrap;
+  background: var(--surface-2); border: 1px solid var(--line-2); box-shadow: 0 8px 28px rgba(0, 0, 0, .6);
+  font-size: 12.5px; color: var(--muted);
+}
+.chart-tip.below { transform: translate(-50%, 0); }
+.chart-tip b { color: var(--text); font-size: 15px; font-weight: 650; }
+
+.burn-log { list-style: none; padding: 0; margin: 0; }
+.burn-log li {
+  display: grid; grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) auto; gap: 14px; align-items: baseline;
+  padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; font-variant-numeric: tabular-nums;
+}
+.burn-log .d { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.burn-log .t small { display: block; margin-top: 2px; color: var(--faint); font-size: 12.5px; }
+.burn-log .len { text-align: right; }
+.burn-log .live .len { color: var(--accent); }
+.st-more { display: block; margin: 16px auto 0; }
+@media (max-width: 720px) {
+  .hero-val { font-size: 54px; }
+  .burn-log li { grid-template-columns: minmax(0, 6.5em) minmax(0, 1fr) auto; gap: 10px; }
 }

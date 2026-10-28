@@ -582,6 +582,24 @@ class App:
             "goals": settings["goals"], "days": days,
         }
 
+    def burns(self, t=None):
+        """Every stretch actually burned, oldest first, for the Stats page. The page buckets them itself,
+        in the viewer's own timezone."""
+        t = t or now()
+        out = []
+        for r in self.s.q("SELECT * FROM sessions WHERE deleted=0 AND started_at < ? ORDER BY started_at", (t,)):
+            stopped = r["stopped_at"]
+            end = min(r["ends_at"], stopped or r["ends_at"], t)
+            if end <= r["started_at"]:
+                continue  # scrubbed before liftoff
+            out.append({
+                "id": r["uid"], "start": r["started_at"], "end": end, "minutes": r["minutes"],
+                "planned": r["planned"] or r["minutes"], "source": r["source"],
+                "early": stopped is not None and stopped < r["ends_at"],
+                "live": stopped is None and r["ends_at"] > t,
+            })
+        return {"now": t, "burns": out}
+
     # ---- state
 
     def ignite_state(self):
@@ -761,6 +779,8 @@ def make_handler(app):
                     return app.put_settings(self.body())
             if r == ["stats"] and m == "GET":
                 return app.stats()
+            if r == ["burns"] and m == "GET":
+                return app.burns()
             if r == ["sync"] and m == "POST":
                 return app.sync(self.body())
             if r == ["ping"] and m == "GET":
