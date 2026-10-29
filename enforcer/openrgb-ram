@@ -9,10 +9,11 @@ with $IGNITION_COLOR set to ignition's accent (e.g. e23a29), or amber for a T-mi
   openrgb-ram idle       # put them back: static $IGNITION_IDLE_COLOR if set, else the profile saved at burn
 
 With hooks.steps set, the enforcer also passes $IGNITION_STEPS and $IGNITION_LEFT (how many of those steps
-are still to go), and each stick becomes a gauge that goes out one part at a time: with 5 steps and 5 LEDs
-a stick, every LED is 20% of the burn or T-minus. A burn's lit LEDs sit at the LED 1 end of the stick and a
-T-minus's at the other, so the two read upside down to each other; IGNITION_RGB_FLIP=1 swaps the ends.
-Every zone (stick) shows the same gauge. A gauge needs per-LED colour, i.e. Direct mode, which some RAM
+are still to go), and each stick becomes a gauge that moves one part at a time: with 5 steps and 5 LEDs a
+stick, every LED is 20% of the burn or T-minus. No LED is ever off: the background is $IGNITION_IDLE_COLOR,
+or white. A T-minus starts all background and turns $IGNITION_COLOR one LED at a time; a burn starts all
+$IGNITION_COLOR and goes back to the background one LED at a time. Both move from the far end of the stick
+towards LED 1; IGNITION_RGB_FLIP=1 swaps the ends. Every zone (stick) shows the same gauge. A gauge needs per-LED colour, i.e. Direct mode, which some RAM
 forgets over a suspend; the enforcer repaints after a resume.
 
 Only RAM is ever opened. OpenRGB runs with its own config (CONFIG_DIR) that turns off every detector
@@ -126,14 +127,16 @@ def color(var, default=None):
     return c or default
 
 
-def gauge(dev, c, left, steps, top):
-    """Per-LED colours for a device: in every zone, the share of LEDs still to go lit in c and the rest
-    off, lit from the LED 1 end of the zone, or from the other end if top."""
+def gauge(dev, c, bg, left, steps, flip, fill):
+    """Per-LED colours for a device: in every zone, the share of LEDs still to go in c (or, if fill, in bg)
+    and the rest in the other colour, the part still to go at the LED 1 end of the zone, or at the other
+    end if flip."""
     zones = max(1, dev["zones"])
     per = dev["leds"] // zones
     lit = math.ceil(left * per / steps)
-    zone = [c if i < lit else "000000" for i in range(per)]
-    if top:
+    ahead, done = (bg, c) if fill else (c, bg)
+    zone = [ahead] * lit + [done] * (per - lit)
+    if flip:
         zone.reverse()
     return ",".join(zone * zones + [c] * (dev["leds"] - per * zones))
 
@@ -141,11 +144,12 @@ def gauge(dev, c, left, steps, top):
 def paint(c, phase=None):
     """Static c on every target, or with $IGNITION_STEPS a gauge (see the top) in Direct mode."""
     steps, left = (int(os.environ.get(v) or 0) for v in ("IGNITION_STEPS", "IGNITION_LEFT"))
-    top = (phase == "countdown") != (os.environ.get("IGNITION_RGB_FLIP", "") not in ("", "0"))
+    flip = os.environ.get("IGNITION_RGB_FLIP", "") not in ("", "0")
+    bg = color("IGNITION_IDLE_COLOR", "ffffff")
     painted = None
     for d in find_targets():
         if phase and steps > 0 and d["leds"]:
-            painted = ("direct", gauge(d, c, left, steps, top))
+            painted = ("direct", gauge(d, c, bg, left, steps, flip, phase == "countdown"))
         else:
             painted = ("static", c)
         r = run("--device", str(d["index"]), "--mode", painted[0], "--color", painted[1])

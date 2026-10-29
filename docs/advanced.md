@@ -99,11 +99,12 @@ devices by name, and `IGNITION_IDLE_COLOR` (e.g. `ffffff`) for RAM that doesn't 
   --hook-idle 'IGNITION_IDLE_COLOR=ffffff /usr/local/lib/ignition/openrgb-ram idle'
 ```
 
-Add a countdown hook and steps and the RAM counts down instead: each stick becomes a gauge that goes out a
-part at a time, so with 5 steps on sticks of 5 LEDs every LED is 20% of the burn or T-minus. A burn is red and
-lit from the LED 1 end; a T-minus is amber and lit from the other end, upside down to it. Every stick shows the
-same gauge. If LED 1 is at the top of your sticks, `IGNITION_RGB_FLIP=1` swaps the ends, so a burn drains
-from the top like a fuel gauge:
+Add a countdown hook and steps and the RAM counts down instead: each stick becomes a gauge that moves a
+part at a time, so with 5 steps on sticks of 5 LEDs every LED is 20% of the burn or T-minus. No LED is ever
+off; the background is `IGNITION_IDLE_COLOR`, or white. A T-minus starts all white and turns amber one LED at
+a time; a burn starts all red and goes back to white one LED at a time. Both move from the far end of the
+stick towards LED 1, and every stick shows the same gauge. If LED 1 is at the top of your sticks,
+`IGNITION_RGB_FLIP=1` swaps the ends, so both move down from the top like a fuel gauge:
 
 ```sh
   --hook-burn 'IGNITION_COLOR=ff0000 IGNITION_RGB_FLIP=1 /usr/local/lib/ignition/openrgb-ram burn' \
