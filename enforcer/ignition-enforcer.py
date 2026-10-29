@@ -44,7 +44,7 @@ HOSTS = Path("/etc/hosts")
 HOSTS_BEGIN = "# >>> ignition: blocked while burning >>>"
 HOSTS_END = "# <<< ignition <<<"
 ACCENT = "e23a29"
-COUNTDOWN_COLOR = "ff8000"
+COUNTDOWN_COLOR = "ffd000"
 
 # Other domains that belong to a site; subdomains are covered separately.
 ALIASES = {
@@ -332,8 +332,9 @@ class Enforcer:
         cmd = self.hooks.get(name)
         if not cmd:
             return
-        color = (self.hooks.get("countdown_color") or COUNTDOWN_COLOR) if name == "countdown" else None
-        env = {**os.environ, "IGNITION_COLOR": color or self.hooks.get("color") or ACCENT, "IGNITION_PHASE": name}
+        burn = self.hooks.get("color") or ACCENT
+        color = (self.hooks.get("countdown_color") or COUNTDOWN_COLOR) if name == "countdown" else burn
+        env = {**os.environ, "IGNITION_COLOR": color, "IGNITION_BURN_COLOR": burn, "IGNITION_PHASE": name}
         if self.steps and name != "idle":
             env.update(IGNITION_STEPS=str(self.steps), IGNITION_LEFT=str(left))
         try:

@@ -19,7 +19,7 @@ this for you.
   --t3-ports LIST     T3 Code ports to cut off during a burn (e.g. 3773); T3 Code itself keeps running
   --hook-burn CMD     shell command to run when a burn starts (\$IGNITION_COLOR is the accent, e.g. e23a29)
   --hook-idle CMD     shell command to run when it ends
-  --hook-countdown CMD  shell command to run when a T-minus starts (\$IGNITION_COLOR is amber, ff8000)
+  --hook-countdown CMD  shell command to run when a T-minus starts (\$IGNITION_COLOR is yellow, ffd000)
   --hook-steps N      re-run the burn and countdown hooks as each 1/N of them passes, with \$IGNITION_STEPS=N
                       and \$IGNITION_LEFT the steps to go (0 turns it off)
 
