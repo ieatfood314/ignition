@@ -44,7 +44,7 @@ HOSTS = Path("/etc/hosts")
 HOSTS_BEGIN = "# >>> ignition: blocked while burning >>>"
 HOSTS_END = "# <<< ignition <<<"
 ACCENT = "e23a29"
-COUNTDOWN_COLOR = "ffd000"
+COUNTDOWN_COLOR = "ff8000"
 
 # Other domains that belong to a site; subdomains are covered separately.
 ALIASES = {
@@ -103,6 +103,7 @@ class Enforcer:
         self.hook_next = None  # the hook run waiting for the hook thread; only the latest is kept
         self.hook_busy = False
         self.hook_cv = threading.Condition()
+        self.show_lock = threading.Lock()
         self.notify_user = cfg.get("notify_user")
         self.session = self.load_cache()
         self.remote = self.session.pop("block", None) or {"sites": [], "programs": []}
@@ -289,7 +290,9 @@ class Enforcer:
         """(hook, steps left) the hooks should be showing: the burn or the T-minus, with how many of
         self.steps parts of it are still to go (0 without steps), or ("idle", 0)."""
         s, t = self.session, time.time()
-        if self.active():
+        # A T-minus whose liftoff has passed is a burn, even before the next sync says so.
+        lifted = s.get("phase") == "countdown" and (s.get("started_at") or t) <= t < (s.get("ends_at") or 0)
+        if self.active() or lifted:
             name, a, b = "burn", s.get("started_at") or t, s["ends_at"]
         elif s.get("phase") == "countdown" and t < (s.get("started_at") or 0):
             name, a, b = "countdown", s.get("created_at") or t, s["started_at"]
@@ -303,10 +306,11 @@ class Enforcer:
 
     def show(self, again=False):
         """Run the hook for whatever should be showing, if that changed (or again, e.g. after a resume)."""
-        want = self.display()
-        if want != self.shown or (again and want[0] != "idle"):
-            self.shown = want
-            self.run_hook(*want)
+        with self.show_lock:
+            want = self.display()
+            if want != self.shown or (again and want[0] != "idle"):
+                self.shown = want
+                self.run_hook(*want)
 
     def run_hook(self, name, left=0):
         with self.hook_cv:
@@ -600,6 +604,7 @@ class Enforcer:
     def process_loop(self):
         while not self.stop.is_set():
             try:
+                self.show()  # the next step of the RAM countdown, on the second rather than at the next sync
                 if not self.active():
                     self.thaw()
                     self.warn_liftoff()

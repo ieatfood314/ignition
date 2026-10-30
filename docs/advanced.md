@@ -74,7 +74,7 @@ options you don't pass. Config lives in `/etc/ignition/enforcer.json`. Edit it a
 | `--t3-ports LIST` | [T3 Code](https://github.com/pingdotgg/t3code) ports to cut off during a burn, e.g. `3773`. |
 | `--hook-burn CMD` | Shell command to run when a burn starts. `$IGNITION_COLOR` is the accent, e.g. `e23a29`. |
 | `--hook-idle CMD` | Shell command to run when it ends. |
-| `--hook-countdown CMD` | Shell command to run when a T-minus starts. `$IGNITION_COLOR` is yellow, `ffd000`, and `$IGNITION_BURN_COLOR` the burn's. |
+| `--hook-countdown CMD` | Shell command to run when a T-minus starts. `$IGNITION_COLOR` is amber, `ff8000`, and `$IGNITION_BURN_COLOR` the burn's. |
 | `--hook-steps N` | Re-run the burn and countdown hooks each time another 1/N of them passes, with `$IGNITION_STEPS` set to N and `$IGNITION_LEFT` to the steps still to go. |
 
 `--block-ports` and `--t3-ports` need nftables (`apt/dnf/pacman install nftables`).
@@ -101,8 +101,8 @@ devices by name, and `IGNITION_IDLE_COLOR` (e.g. `ffffff`) for RAM that doesn't 
 
 Add a countdown hook and steps and the RAM counts down instead: each stick becomes a gauge that moves a
 part at a time, so with 5 steps on sticks of 5 LEDs every LED is 20% of the burn or T-minus. No LED is ever
-off. A T-minus starts all yellow and turns red one LED at a time; a burn starts all red and turns white
-(`IGNITION_IDLE_COLOR`) one LED at a time. So any yellow means a T-minus, red and no yellow a burn, and white
+off. A T-minus starts all amber and turns red one LED at a time; a burn starts all red and turns white
+(`IGNITION_IDLE_COLOR`) one LED at a time. So any amber means a T-minus, red and no amber a burn, and white
 on its own means no burn. Both move from the far end of the stick towards LED 1, and every stick shows the
 same gauge. If LED 1 is at the top of your sticks, `IGNITION_RGB_FLIP=1` swaps the ends, so both move down
 from the top like a fuel gauge. A burn colour set in the burn hook has to be given to the countdown hook too,
@@ -117,6 +117,13 @@ as `IGNITION_BURN_COLOR`:
 
 The gauge needs per-LED colour (OpenRGB's Direct mode), which some RAM forgets over a suspend, so the
 enforcer repaints it after a resume.
+
+An OpenRGB command spends seconds finding the RAM each time, so the hook starts an OpenRGB server on
+`127.0.0.1:6743` the first time it runs and paints through that, in milliseconds; the enforcer moves the
+gauge on the second. Two OpenRGBs probing the SMBus at once garble each other (one can find half the RAM),
+so if another script of yours sets the RAM too, have it take the hook's lock, e.g.
+`flock /etc/ignition/openrgb-ram-only openrgb ...`, and during a burn (while `/run/ignition/rgb-saved`
+exists) run `openrgb-ram repaint` instead, which needs no root.
 
 ### How the lockout works on computers
 

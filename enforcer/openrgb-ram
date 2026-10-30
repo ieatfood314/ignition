@@ -2,37 +2,49 @@
 """Recolour this machine's RAM while a burn is on, and put it back afterwards.
 
 Used as an ignition enforcer hook (hooks.burn / hooks.countdown / hooks.idle). The enforcer runs it as root
-with $IGNITION_COLOR set to ignition's accent (e.g. e23a29), or yellow for a T-minus, and
+with $IGNITION_COLOR set to ignition's accent (e.g. e23a29), or amber for a T-minus, and
 $IGNITION_BURN_COLOR to the burn's colour whichever hook it is.
 
   openrgb-ram burn       # set every DRAM device to static $IGNITION_COLOR
   openrgb-ram countdown  # the same, for a T-minus
   openrgb-ram idle       # put them back: static $IGNITION_IDLE_COLOR if set, else the profile saved at burn
+  openrgb-ram repaint    # paint what's in MARKER again, e.g. after something else reset the RAM (any user)
 
 With hooks.steps set, the enforcer also passes $IGNITION_STEPS and $IGNITION_LEFT (how many of those steps
 are still to go), and each stick becomes a gauge that moves one part at a time: with 5 steps and 5 LEDs a
 stick, every LED is 20% of the burn or T-minus. No LED is ever off. A T-minus starts all $IGNITION_COLOR
-(yellow) and turns $IGNITION_BURN_COLOR one LED at a time; a burn starts all $IGNITION_COLOR and turns
-$IGNITION_IDLE_COLOR (or white) one LED at a time. So any yellow means a T-minus, red and no yellow a burn,
+(amber) and turns $IGNITION_BURN_COLOR one LED at a time; a burn starts all $IGNITION_COLOR and turns
+$IGNITION_IDLE_COLOR (or white) one LED at a time. So any amber means a T-minus, red and no amber a burn,
 and white with no red, idle. Both move from the far end of the stick towards LED 1; IGNITION_RGB_FLIP=1
-swaps the ends. Every zone (stick) shows the same gauge. A gauge needs per-LED colour, i.e. Direct mode, which some RAM
-forgets over a suspend; the enforcer repaints after a resume.
+swaps the ends. Every zone (stick) shows the same gauge. A gauge needs per-LED colour, i.e. Direct mode,
+which some RAM forgets over a suspend; the enforcer repaints after a resume.
 
 Only RAM is ever opened. OpenRGB runs with its own config (CONFIG_DIR) that turns off every detector
 without "DRAM" in its name: a full detection takes over other devices too, and Razer keyboards, for one,
 go dark when it does, whatever they were set to.
 
+Every OpenRGB command spends seconds finding the RAM again, so the first run starts an OpenRGB server
+(127.0.0.1:SERVER_PORT, the same RAM-only config) that stays up, and every paint goes through it in a few
+milliseconds. An OpenRGB detection garbles, and is garbled by, anything else on the SMBus at the time (it
+can find half a device), so detecting and painting here hold an flock on CONFIG_DIR; other scripts that
+run OpenRGB on the RAM should take it too (`flock /etc/ignition/openrgb-ram-only openrgb ...`).
+
 Some RAM (HyperX Fury, for one) reads back as black, so a saved profile restores it dark. For those, set
 IGNITION_IDLE_COLOR to the colour it normally is. A marker file (MARKER) exists for as long as the RAM is
 recoloured, so other scripts that keep the RAM a colour can stand aside or follow the burn; it also stops
 a restart mid-burn from saving the already-recoloured state as the profile. It holds the OpenRGB mode and
-colours last painted ("direct ff0000,000000,..." or "static ff0000"), so such a script can repaint them.
+colours last painted ("direct ff0000,000000,..." or "static ff0000"), and `openrgb-ram repaint` paints
+them again through the server.
 """
+import contextlib
+import fcntl
 import json
 import math
 import os
 import re
 import shutil
+import socket
+import struct
 import subprocess
 import sys
 import time
@@ -40,6 +52,8 @@ import time
 CONFIG_DIR = "/etc/ignition/openrgb-ram-only"
 PROFILE = "ignition-restore"
 MARKER = "/run/ignition/rgb-saved"
+SERVER_PORT = 6743  # not OpenRGB's default 6742, which a desktop OpenRGB may be using
+SERVER_PID = "/run/ignition/openrgb-server.pid"
 DEFAULT_COLOR = "e23a29"
 
 
@@ -50,9 +64,22 @@ def openrgb():
     return exe
 
 
+@contextlib.contextmanager
+def bus_lock():
+    """Held while OpenRGB detects, so two detections never probe the SMBus at once (see the top)."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    fd = os.open(CONFIG_DIR, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def run(*args):
-    return subprocess.run([openrgb(), "--config", CONFIG_DIR, "--noautoconnect", *args],
-                          capture_output=True, text=True, timeout=45)
+    with bus_lock():
+        return subprocess.run([openrgb(), "--config", CONFIG_DIR, "--noautoconnect", *args],
+                              capture_output=True, text=True, timeout=45)
 
 
 def ram_only_config():
@@ -85,22 +112,98 @@ def ram_only_config():
         os.replace(tmp, path)
 
 
-def devices():
-    """[{index, name, zones, leds}] from `--list-detailed`: an "N: Name" line, then indented details."""
-    out = []
-    for line in run("--list-detailed").stdout.splitlines():
-        m = re.match(r"^(\d+):\s+(.*\S)", line)
-        if m:
-            out.append({"index": int(m.group(1)), "name": m.group(2), "zones": 0, "leds": 0})
-        elif out and (m := re.match(r"^\s+(Zones|LEDs):(.*)", line)):
-            out[-1][m.group(1).lower()] = len(re.findall(r"'[^']*'", m.group(2)))
-    return out
+class Sdk:
+    """Just enough of OpenRGB's SDK protocol (version 0) to list the RAM and colour it."""
+
+    def __init__(self):
+        self.sock = socket.create_connection(("127.0.0.1", SERVER_PORT), timeout=5)
+        self.send(0, 50, b"ignition\0")  # SET_CLIENT_NAME
+
+    def send(self, dev, pkt, data=b""):
+        self.sock.sendall(b"ORGB" + struct.pack("<III", dev, pkt, len(data)) + data)
+
+    def recv(self, want):
+        def exact(n):
+            b = b""
+            while len(b) < n:
+                chunk = self.sock.recv(n - len(b))
+                if not chunk:
+                    raise ConnectionError("OpenRGB server hung up")
+                b += chunk
+            return b
+        while True:  # skip anything else the server sends, e.g. device list updates
+            _, pkt, size = struct.unpack("<III", exact(16)[4:])
+            data = exact(size)
+            if pkt == want:
+                return data
+
+    def devices(self):
+        """[{index, name, zones: [LEDs in each zone], leds, modes: {name: (index, its data up to colours)}}]"""
+        self.send(0, 0)  # REQUEST_CONTROLLER_COUNT
+        count = struct.unpack("<I", self.recv(0))[0]
+        out = []
+        for i in range(count):
+            self.send(i, 1)  # REQUEST_CONTROLLER_DATA
+            d, o = self.recv(1), 4
+
+            def num(fmt):
+                nonlocal o
+                v = struct.unpack_from("<" + fmt, d, o)[0]
+                o += struct.calcsize("<" + fmt)
+                return v
+
+            def text():
+                nonlocal o
+                n = num("H")
+                o += n
+                return d[o - n:o].rstrip(b"\0").decode(errors="replace")
+
+            num("i")
+            dev = {"index": i, "name": text(), "zones": [], "modes": {}}
+            for _ in range(4):  # description, version, serial, location
+                text()
+            modes = num("H")
+            num("i")
+            for m in range(modes):
+                start = o
+                name = text()
+                o += 9 * 4  # value, flags, speed min/max, colours min/max, speed, direction, colour mode
+                dev["modes"][name.lower()] = (m, d[start:o])
+                colors = num("H")  # read before o is, as num() moves it
+                o += 4 * colors
+            for _ in range(num("H")):
+                text()
+                o += 4 * 3  # type, LEDs min/max
+                dev["zones"].append(num("I"))
+                if num("H"):  # matrix map
+                    h, w = num("I"), num("I")
+                    o += 4 * h * w
+            dev["leds"] = num("H")
+            out.append(dev)
+        return out
+
+    def paint(self, dev, mode, colors):
+        """Mode "direct" with a colour per LED, or a mode like "static" with its colours. Without that
+        mode, the device gets Direct with every LED in the first colour."""
+        if mode not in dev["modes"]:
+            mode, colors = "direct", colors if mode == "direct" else colors[:1] * dev["leds"]
+        rgb = [bytes.fromhex(c) + b"\0" for c in colors]
+        idx, desc = dev["modes"][mode]
+        # The mode is set every time, even Direct: after a suspend the RAM is back on its own effect
+        # while the server still thinks it's in Direct.
+        mode_colors = [] if mode == "direct" else rgb
+        data = struct.pack("<i", idx) + desc + struct.pack("<H", len(mode_colors)) + b"".join(mode_colors)
+        self.send(dev["index"], 1101, struct.pack("<I", len(data) + 4) + data)  # UPDATEMODE
+        if mode == "direct":
+            data = struct.pack("<H", len(rgb)) + b"".join(rgb)
+            self.send(dev["index"], 1050, struct.pack("<I", len(data) + 4) + data)  # UPDATELEDS
+        self.send(0, 0)  # a round trip, so the paint is done before we go
+        self.recv(0)
 
 
-def targets():
+def targets(devs):
     """Which devices to recolour: everything detected (it's all RAM), or just those matching
     $IGNITION_RGB_DEVICES (comma-separated indices or name substrings)."""
-    devs = devices()
     override = os.environ.get("IGNITION_RGB_DEVICES", "").strip()
     if not override:
         return devs
@@ -113,14 +216,54 @@ def targets():
     return [d for d in devs if d["index"] in picks]
 
 
-def find_targets():
-    # Detection comes up empty while another OpenRGB holds the SMBus (e.g. a script that keeps the RAM
-    # a colour), so give it a few tries.
-    for _ in range(6):
-        found = targets()
-        if found:
-            return found
-        time.sleep(5)
+def connect():
+    """(Sdk, targets) from a running server, or None."""
+    try:
+        sdk = Sdk()
+        found = targets(sdk.devices())
+    except (OSError, ValueError, struct.error):
+        return None
+    return (sdk, found) if found else None
+
+
+def stop_server():
+    try:
+        with open(SERVER_PID) as f:
+            pid = int(f.read())
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            if str(SERVER_PORT).encode() in f.read():
+                os.kill(pid, 15)
+    except (OSError, ValueError):
+        pass
+
+
+def server():
+    """(Sdk, targets), starting the OpenRGB server if it isn't up or hasn't found the RAM."""
+    up = connect()
+    if up or os.geteuid():
+        return up or sys.exit("no OpenRGB server with the RAM running")
+    ram_only_config()
+    for _ in range(3):
+        with bus_lock():
+            if up := connect():  # another run started it while this one waited
+                return up
+            stop_server()
+            os.makedirs(os.path.dirname(SERVER_PID), exist_ok=True)
+            proc = subprocess.Popen(
+                [openrgb(), "--server", "--server-host", "127.0.0.1", "--server-port", str(SERVER_PORT),
+                 "--config", CONFIG_DIR, "--noautoconnect", "--loglevel", "error"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True)
+            with open(SERVER_PID, "w") as f:
+                f.write(str(proc.pid))
+            for _ in range(60):
+                time.sleep(0.5)
+                if up := connect():
+                    return up
+                if proc.poll() is not None:
+                    break
+            stop_server()
+        time.sleep(5)  # the SMBus may not be ready yet, e.g. just after a resume
     sys.exit("no DRAM devices found")
 
 
@@ -132,13 +275,12 @@ def color(var, default=None):
 def gauge(dev, c, done, left, steps, flip):
     """Per-LED colours for a device: in every zone, the share of LEDs still to go in c and the rest in
     done, the part still to go at the LED 1 end of the zone, or at the other end if flip."""
-    zones = max(1, dev["zones"])
-    per = dev["leds"] // zones
-    lit = math.ceil(left * per / steps)
-    zone = [c] * lit + [done] * (per - lit)
-    if flip:
-        zone.reverse()
-    return ",".join(zone * zones + [c] * (dev["leds"] - per * zones))
+    out = []
+    for per in dev["zones"] or [dev["leds"]]:
+        lit = math.ceil(left * per / steps)
+        zone = [c] * lit + [done] * (per - lit)
+        out += zone[::-1] if flip else zone
+    return out[:dev["leds"]] + [c] * (dev["leds"] - len(out))
 
 
 def paint(c, phase=None):
@@ -146,16 +288,16 @@ def paint(c, phase=None):
     steps, left = (int(os.environ.get(v) or 0) for v in ("IGNITION_STEPS", "IGNITION_LEFT"))
     flip = os.environ.get("IGNITION_RGB_FLIP", "") not in ("", "0")
     done = color("IGNITION_BURN_COLOR", DEFAULT_COLOR) if phase == "countdown" else color("IGNITION_IDLE_COLOR", "ffffff")
+    sdk, found = server()
     painted = None
-    for d in find_targets():
-        if phase and steps > 0 and d["leds"]:
-            painted = ("direct", gauge(d, c, done, left, steps, flip))
-        else:
-            painted = ("static", c)
-        r = run("--device", str(d["index"]), "--mode", painted[0], "--color", painted[1])
-        if r.returncode:
-            sys.exit(f"openrgb device {d['index']}: {(r.stderr or r.stdout).strip()}")
-    return painted
+    with bus_lock():
+        for d in found:
+            if phase and steps > 0 and d["leds"]:
+                painted = ("direct", gauge(d, c, done, left, steps, flip))
+            else:
+                painted = ("static", [c])
+            sdk.paint(d, *painted)
+    return painted and (painted[0], ",".join(painted[1]))
 
 
 def write_marker(painted):
@@ -168,7 +310,6 @@ def burn(phase="burn"):
     ram_only_config()
     if not os.path.exists(MARKER):
         if not color("IGNITION_IDLE_COLOR"):
-            find_targets()
             run("--save-profile", PROFILE)
         os.makedirs(os.path.dirname(MARKER), exist_ok=True)
         write_marker(None)
@@ -188,6 +329,19 @@ def idle():
         run("--profile", PROFILE)
 
 
+def repaint():
+    try:
+        with open(MARKER) as f:
+            mode, colors = f.read().split()
+    except (OSError, ValueError):
+        sys.exit("nothing to repaint")
+    sdk, found = server()
+    with bus_lock():
+        for d in found:
+            sdk.paint(d, mode, colors.split(","))
+
+
 if __name__ == "__main__":
-    {"burn": burn, "countdown": lambda: burn("countdown"), "idle": idle}.get(
-        sys.argv[1] if len(sys.argv) > 1 else "", lambda: sys.exit("usage: openrgb-ram burn|countdown|idle"))()
+    {"burn": burn, "countdown": lambda: burn("countdown"), "idle": idle, "repaint": repaint}.get(
+        sys.argv[1] if len(sys.argv) > 1 else "",
+        lambda: sys.exit("usage: openrgb-ram burn|countdown|idle|repaint"))()
