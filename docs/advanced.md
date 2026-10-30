@@ -106,11 +106,12 @@ off. A T-minus starts all amber and turns red one LED at a time; a burn starts a
 on its own means no burn. Both move from the far end of the stick towards LED 1, and every stick shows the
 same gauge. If LED 1 is at the top of your sticks, `IGNITION_RGB_FLIP=1` swaps the ends, so both move down
 from the top like a fuel gauge. A burn colour set in the burn hook has to be given to the countdown hook too,
-as `IGNITION_BURN_COLOR`:
+as `IGNITION_BURN_COLOR`, and an idle colour to all three (without one, the first paint also saves an
+OpenRGB profile to restore, which takes a few seconds):
 
 ```sh
-  --hook-burn 'IGNITION_COLOR=ff0000 IGNITION_RGB_FLIP=1 /usr/local/lib/ignition/openrgb-ram burn' \
-  --hook-countdown 'IGNITION_BURN_COLOR=ff0000 IGNITION_RGB_FLIP=1 /usr/local/lib/ignition/openrgb-ram countdown' \
+  --hook-burn 'IGNITION_COLOR=ff0000 IGNITION_IDLE_COLOR=ffffff IGNITION_RGB_FLIP=1 /usr/local/lib/ignition/openrgb-ram burn' \
+  --hook-countdown 'IGNITION_BURN_COLOR=ff0000 IGNITION_IDLE_COLOR=ffffff IGNITION_RGB_FLIP=1 /usr/local/lib/ignition/openrgb-ram countdown' \
   --hook-idle 'IGNITION_IDLE_COLOR=ffffff /usr/local/lib/ignition/openrgb-ram idle' \
   --hook-steps 5
 ```
