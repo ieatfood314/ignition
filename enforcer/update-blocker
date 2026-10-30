@@ -1,0 +1,32 @@
+#!/bin/sh
+# Brings the blocker up to GitHub's main, keeping its settings. update.sh runs it with sudo. It works from its
+# own root-owned clone of the repo, so root never runs code a user could have edited. To let unattended updates
+# (topgrade on a timer) run it without a password:
+#
+#   echo "$USER ALL=(root) NOPASSWD: /usr/local/lib/ignition/update-blocker" | sudo tee /etc/sudoers.d/ignition-update
+set -eu
+
+repo=https://github.com/ieatfood314/ignition.git
+src=/usr/local/lib/ignition/src
+# sudo can keep the caller's HOME, and their git config could run commands, so git sees none of it.
+export HOME=/root GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+
+# Everything runs from inside main, which sh has read in full before it starts, because install.sh replaces
+# this very file.
+main() {
+    [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
+    command -v git >/dev/null || { echo "needs git" >&2; exit 1; }
+    if [ -d "$src/.git" ]; then
+        git -C "$src" fetch -q --depth 1 origin main
+        git -C "$src" reset -q --hard FETCH_HEAD
+    else
+        rm -rf "$src"
+        git clone -q --depth 1 "$repo" "$src"
+    fi
+    head=$(git -C "$src" rev-parse HEAD)
+    [ "$head" != "$(cat /etc/ignition/commit 2>/dev/null || true)" ] || exit 0
+    sh "$src/enforcer/install.sh" >/dev/null
+    echo "$head" >/etc/ignition/commit
+    git -C "$src" log -1 --format='%h %s'
+}
+main "$@"; exit

@@ -51,9 +51,17 @@ main() {
         fi
         head=$(git -C "$code" rev-parse HEAD)
         if [ "$head" != "$(cat /etc/ignition/commit 2>/dev/null || true)" ]; then
-            sudo sh "$code/enforcer/install.sh" >/dev/null
-            echo "$head" | sudo tee /etc/ignition/commit >/dev/null
-            say "blocker updated to $(git -C "$code" log -1 --format='%h %s')"
+            if [ -x /usr/local/lib/ignition/update-blocker ]; then
+                # The blocker runs as root, so it updates from its own copy of GitHub's main, not this checkout.
+                new=$(sudo /usr/local/lib/ignition/update-blocker) || die "the blocker needs sudo to update. \
+For updates without a password, see Updating in docs/advanced.md."
+                [ -z "$new" ] || say "blocker updated to $new"
+            else
+                # Blockers from before update-blocker existed; this installs it for next time.
+                sudo sh "$code/enforcer/install.sh" >/dev/null
+                echo "$head" | sudo tee /etc/ignition/commit >/dev/null
+                say "blocker updated to $(git -C "$code" log -1 --format='%h %s')"
+            fi
         fi
     fi
 

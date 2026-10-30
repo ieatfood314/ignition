@@ -52,6 +52,14 @@ reinstalls the blocker, keeping its settings, if there's a new commit. It's buil
 "ignition" = "curl -fsSL https://raw.githubusercontent.com/ieatfood314/ignition/main/update.sh | sh"
 ```
 
+The blocker runs as root, so it updates from its own root-owned clone of `main` in
+`/usr/local/lib/ignition/src`, through `sudo /usr/local/lib/ignition/update-blocker`. On a timer there's no
+one to type the password; to allow just that command without one:
+
+```sh
+echo "$USER ALL=(root) NOPASSWD: /usr/local/lib/ignition/update-blocker" | sudo tee /etc/sudoers.d/ignition-update
+```
+
 On phones, [Obtainium](https://obtainium.imranr.dev/) pointed at this repo installs each new release.
 
 Not on Linux? The server still runs anywhere Python 3 does: `python3 server/ignition.py`, then open

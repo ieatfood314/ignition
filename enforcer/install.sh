@@ -143,6 +143,7 @@ PY
 
 install -D -m 0755 "$here/ignition-enforcer.py" /usr/local/lib/ignition/ignition-enforcer.py
 install -D -m 0755 "$here/openrgb-ram" /usr/local/lib/ignition/openrgb-ram
+install -D -m 0755 "$here/update-blocker" /usr/local/lib/ignition/update-blocker
 install -D -m 0644 "$here/ignition-enforcer.service" /etc/systemd/system/ignition-enforcer.service
 
 systemctl daemon-reload

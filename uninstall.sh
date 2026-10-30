@@ -45,6 +45,7 @@ if [ -f /etc/systemd/system/ignition-enforcer.service ]; then
     sudo rm -f /etc/systemd/system/ignition-enforcer.service
     sudo systemctl daemon-reload
     sudo rm -rf /usr/local/lib/ignition /etc/ignition /var/lib/ignition
+    sudo rm -f /etc/sudoers.d/ignition-update
     sudo rm -f /etc/opt/chrome/policies/managed/ignition.json /etc/chromium/policies/managed/ignition.json \
         /etc/brave/policies/managed/ignition.json
     # Undo the DNS-over-HTTPS lock the blocker put on Firefox-family browsers, leaving other policies alone.
