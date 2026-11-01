@@ -579,9 +579,9 @@ function setMinutes(m, tick = true) {
  * The SVG has touch-action: none (in CSS), since Chrome ignores touch-action on shapes inside an SVG and
  * would take the drag as a scroll. `centre` is what tapping the middle does, if anything.
  */
-function turnable(svg, { cx, r, inner, get, set, min, max, centre = null }) {
+function turnable(svg, { cx, r, inner, get, set, min, max, step, centre = null }) {
   let drag = null;
-  const snap = (m) => Math.max(min, Math.min(max, Math.round(m / 5) * 5));
+  const snap = (m) => Math.max(min, Math.min(max, Math.round(m / step) * step));
   const point = (e) => {
     const b = svg.getBoundingClientRect(), k = (2 * cx) / b.width;
     const x = (e.clientX - b.left) * k - cx, y = (e.clientY - b.top) * k - cx;
@@ -641,12 +641,12 @@ function turnable(svg, { cx, r, inner, get, set, min, max, centre = null }) {
     while (Math.abs(wheel) >= 40) {
       const up = wheel < 0, m = get();
       wheel -= Math.sign(wheel) * 40;
-      set(up ? Math.floor(m / 5) * 5 + 5 : Math.ceil(m / 5) * 5 - 5);
+      set(up ? Math.floor(m / step) * step + step : Math.ceil(m / step) * step - step);
     }
   }, { passive: false });
   svg.addEventListener("keydown", (e) => {
     if (!live()) return;
-    const d = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5, PageUp: 60, PageDown: -60 }[e.key];
+    const d = { ArrowUp: step, ArrowRight: step, ArrowDown: -step, ArrowLeft: -step, PageUp: 60, PageDown: -60 }[e.key];
     if (d) { e.preventDefault(); set(get() + (e.shiftKey ? Math.sign(d) : d)); }
     if (e.key === "Enter") $("#ignite-btn").click();
   });
@@ -654,7 +654,7 @@ function turnable(svg, { cx, r, inner, get, set, min, max, centre = null }) {
 }
 
 const mainDial = turnable(bezel, {
-  cx: CX, r: R, inner: 0.72, min: 5, max: 720,
+  cx: CX, r: R, inner: 0.72, min: 1, max: 720, step: 1,
   get: () => launch.minutes, set: (m) => setMinutes(m),
 });
 
@@ -679,7 +679,7 @@ function setDelay(d) {
 }
 
 const subDial = turnable(sub, {
-  cx: SUB_C, r: SUB_R, inner: 0.55, min: 0, max: 1440,
+  cx: SUB_C, r: SUB_R, inner: 0.55, min: 0, max: 1440, step: 5,
   get: () => launch.delay, set: setDelay, centre: () => setDelay(0),
 });
 
