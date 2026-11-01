@@ -574,11 +574,12 @@ function setMinutes(m, tick = true) {
 
 /**
  * Makes an SVG dial turnable like a minute hand: each lap is an hour, and going round past twelve adds (or
- * takes off) one. Drag the knob (or, with a mouse, anywhere on the ring), tap the ring to jump there,
- * scroll, or use the arrow keys. `whole` lets touch drag anywhere on it too (fine on a small dial, which
- * isn't in the way of scrolling); `centre` is what tapping the middle does, if anything.
+ * takes off) one. Grab it anywhere on the ring and turn, tap the ring to jump there, scroll, or use the
+ * arrow keys. A mouse grabbing the ring moves the hand there first; a finger turns it from where it is.
+ * The SVG has touch-action: none (in CSS), since Chrome ignores touch-action on shapes inside an SVG and
+ * would take the drag as a scroll. `centre` is what tapping the middle does, if anything.
  */
-function turnable(svg, { cx, r, inner, get, set, min, max, whole = false, centre = null }) {
+function turnable(svg, { cx, r, inner, get, set, min, max, centre = null }) {
   let drag = null;
   const snap = (m) => Math.max(min, Math.min(max, Math.round(m / 5) * 5));
   const point = (e) => {
@@ -604,22 +605,18 @@ function turnable(svg, { cx, r, inner, get, set, min, max, whole = false, centre
       if (centre) drag = { id: e.pointerId, tap: [e.clientX, e.clientY], centre: true };
       return;
     }
-    const onKnob = e.target.closest(".knob");
-    if (onKnob || whole || e.pointerType === "mouse") {
-      e.preventDefault();
-      svg.setPointerCapture(e.pointerId);
-      drag = { id: e.pointerId, frac: p.frac, value: get(), start: [e.clientX, e.clientY], moved: !!onKnob };
-      svg.closest(".console, .subdial").classList.add("dragging");
-    } else {
-      drag = { id: e.pointerId, tap: [e.clientX, e.clientY], frac: p.frac };
-    }
+    const onKnob = !!e.target.closest(".knob");
+    e.preventDefault();
+    svg.setPointerCapture(e.pointerId);
+    drag = { id: e.pointerId, frac: p.frac, value: get(), start: [e.clientX, e.clientY], moved: onKnob, jump: !onKnob && e.pointerType === "mouse" };
+    svg.closest(".console, .subdial").classList.add("dragging");
   });
   svg.addEventListener("pointermove", (e) => {
     if (!drag || drag.id !== e.pointerId || drag.tap) return;
     if (!drag.moved) {
       if (Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 6) return;
       drag.moved = true;
-      if (!whole) { drag.value = at(drag.frac); set(drag.value); } // a mouse grabbing the ring moves the hand there first
+      if (drag.jump) { drag.value = at(drag.frac); set(drag.value); }
     }
     const { frac } = point(e);
     let d = frac - drag.frac;
@@ -682,7 +679,7 @@ function setDelay(d) {
 }
 
 const subDial = turnable(sub, {
-  cx: SUB_C, r: SUB_R, inner: 0.55, min: 0, max: 1440, whole: true,
+  cx: SUB_C, r: SUB_R, inner: 0.55, min: 0, max: 1440,
   get: () => launch.delay, set: setDelay, centre: () => setDelay(0),
 });
 
