@@ -59,15 +59,19 @@
         </div>
 
         <div class="launch-params" id="launch-params">
-          <div class="tminus" id="tminus" role="group" aria-label="T-minus, in minutes">
-            <span class="lbl">T−</span>
-            <button type="button" data-delay="0">0</button>
-            <button type="button" data-delay="5">5</button>
-            <button type="button" data-delay="10">10</button>
-            <button type="button" data-delay="15">15</button>
-            <button type="button" data-delay="30">30</button>
-            <button type="button" data-delay="60">60</button>
-            <span class="lbl">min</span>
+          <div class="subdial zero">
+            <svg id="tminus-dial" viewBox="0 0 200 200" role="slider" tabindex="0" aria-label="T-minus"
+                 aria-valuemin="0" aria-valuemax="1440" aria-valuenow="0">
+              <g id="sub-ticks" class="sub-ticks"></g>
+              <circle class="sub-track" cx="100" cy="100" r="74"/>
+              <circle class="sub-arc" id="sub-arc" cx="100" cy="100" r="74" transform="rotate(-90 100 100)"/>
+              <g class="knob" id="sub-knob"><circle class="knob-hit" r="24"/><circle class="knob-dot" r="7"/></g>
+            </svg>
+            <div class="sub-face" aria-hidden="true">
+              <span class="sub-lbl">T−</span>
+              <span class="sub-val" id="tminus-val">0</span>
+              <span class="sub-lbl" id="tminus-unit">min</span>
+            </div>
           </div>
           <p class="abort-rule" id="abort-rule"></p>
         </div>

@@ -465,7 +465,7 @@ function reloadIfStale(build) {
   if (!build) return; // the Android app updates as a whole
   state.build = state.build || build;
   if (build === state.build) return;
-  const busy = arming || dialDrag || addDialog.open || saveTimer || mecoDialog.open ||
+  const busy = arming || mainDial.dragging() || subDial.dragging() || addDialog.open || saveTimer || mecoDialog.open ||
     ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
   if (!busy) location.reload();
 }
@@ -510,9 +510,8 @@ function liftoff(text = "Liftoff.") {
 const dialEl = $("#dial"), bezel = $("#bezel");
 const launch = {
   minutes: Math.min(720, Math.max(1, parseInt(ls.getItem("ignition.minutes"), 10) || 50)),
-  delay: [0, 5, 10, 15, 30, 60].includes(parseInt(ls.getItem("ignition.delay"), 10)) ? parseInt(ls.getItem("ignition.delay"), 10) : 0,
+  delay: Math.min(1440, Math.max(0, parseInt(ls.getItem("ignition.delay"), 10) || 0)),
 };
-let dialDrag = null;
 
 const polar = (frac, r) => {
   const a = frac * 2 * Math.PI - Math.PI / 2;
@@ -573,87 +572,140 @@ function setMinutes(m, tick = true) {
   renderIgnite();
 }
 
-/** Where on the bezel a pointer is: 0..1 round from twelve o'clock, and how far out (0 centre, 1 the track). */
-function bezelPoint(e) {
-  const r = bezel.getBoundingClientRect();
-  const x = (e.clientX - r.left) / r.width * 400 - CX, y = (e.clientY - r.top) / r.height * 400 - CX;
-  let a = Math.atan2(y, x) + Math.PI / 2;
-  if (a < 0) a += 2 * Math.PI;
-  return { frac: a / (2 * Math.PI), dist: Math.hypot(x, y) / R };
-}
+/**
+ * Makes an SVG dial turnable like a minute hand: each lap is an hour, and going round past twelve adds (or
+ * takes off) one. Drag the knob (or, with a mouse, anywhere on the ring), tap the ring to jump there,
+ * scroll, or use the arrow keys. `whole` lets touch drag anywhere on it too (fine on a small dial, which
+ * isn't in the way of scrolling); `centre` is what tapping the middle does, if anything.
+ */
+function turnable(svg, { cx, r, inner, get, set, min, max, whole = false, centre = null }) {
+  let drag = null;
+  const snap = (m) => Math.max(min, Math.min(max, Math.round(m / 5) * 5));
+  const point = (e) => {
+    const b = svg.getBoundingClientRect(), k = (2 * cx) / b.width;
+    const x = (e.clientX - b.left) * k - cx, y = (e.clientY - b.top) * k - cx;
+    let a = Math.atan2(y, x) + Math.PI / 2;
+    if (a < 0) a += 2 * Math.PI;
+    return { frac: a / (2 * Math.PI), dist: Math.hypot(x, y) / r };
+  };
+  // A jump to a spot on the ring: that minute past whichever hour is nearest to where the dial is now.
+  const at = (frac) => {
+    const prev = get();
+    let best = frac * 60;
+    for (let h = 1; h < 12; h++) if (Math.abs(h * 60 + frac * 60 - prev) < Math.abs(best - prev)) best = h * 60 + frac * 60;
+    return snap(best);
+  };
+  const live = () => state.ignite.phase === "idle" && !arming;
 
-/** A jump to a spot on the ring: that minute past whichever hour is nearest to where the dial is now. */
-function minutesAt(frac, prev) {
-  let best = frac * 60;
-  for (let h = 1; h < 12; h++) {
-    const m = h * 60 + frac * 60;
-    if (Math.abs(m - prev) < Math.abs(best - prev)) best = m;
-  }
-  return snap5(best);
-}
-const snap5 = (m) => Math.max(5, Math.min(720, Math.round(m / 5) * 5));
-
-const dialIdle = () => state.ignite.phase === "idle" && !arming;
-
-bezel.addEventListener("pointerdown", (e) => {
-  if (!dialIdle()) return;
-  const p = bezelPoint(e);
-  if (p.dist < 0.72) return; // that's the core
-  const onKnob = e.target.closest(".knob");
-  if (onKnob || e.pointerType === "mouse") {
+  svg.addEventListener("pointerdown", (e) => {
+    if (!live()) return;
+    const p = point(e);
+    if (p.dist < inner) {
+      if (centre) drag = { id: e.pointerId, tap: [e.clientX, e.clientY], centre: true };
+      return;
+    }
+    const onKnob = e.target.closest(".knob");
+    if (onKnob || whole || e.pointerType === "mouse") {
+      e.preventDefault();
+      svg.setPointerCapture(e.pointerId);
+      drag = { id: e.pointerId, frac: p.frac, value: get(), start: [e.clientX, e.clientY], moved: !!onKnob };
+      svg.closest(".console, .subdial").classList.add("dragging");
+    } else {
+      drag = { id: e.pointerId, tap: [e.clientX, e.clientY], frac: p.frac };
+    }
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (!drag || drag.id !== e.pointerId || drag.tap) return;
+    if (!drag.moved) {
+      if (Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 6) return;
+      drag.moved = true;
+      if (!whole) { drag.value = at(drag.frac); set(drag.value); } // a mouse grabbing the ring moves the hand there first
+    }
+    const { frac } = point(e);
+    let d = frac - drag.frac;
+    d -= Math.round(d); // the short way round
+    drag.frac = frac;
+    drag.value = Math.max(0, Math.min(max, drag.value + d * 60));
+    set(snap(drag.value));
+  });
+  const end = (e) => {
+    if (!drag || drag.id !== e.pointerId) return;
+    const tapped = e.type === "pointerup" && (drag.tap ? Math.hypot(e.clientX - drag.tap[0], e.clientY - drag.tap[1]) < 12 : !drag.moved);
+    if (tapped) drag.centre ? centre() : set(at(drag.frac));
+    drag = null;
+    svg.closest(".console, .subdial").classList.remove("dragging");
+  };
+  ["pointerup", "pointercancel"].forEach((ev) => svg.addEventListener(ev, end));
+  let wheel = 0;
+  svg.addEventListener("wheel", (e) => {
+    if (!live()) return;
     e.preventDefault();
-    bezel.setPointerCapture(e.pointerId);
-    if (!onKnob) setMinutes(minutesAt(p.frac, launch.minutes));
-    // Turning winds a running total, so going round past twelve adds (or takes off) an hour.
-    dialDrag = { id: e.pointerId, frac: p.frac, value: launch.minutes };
-    dialEl.classList.add("dragging");
-  } else {
-    dialDrag = { id: e.pointerId, tap: [e.clientX, e.clientY], frac: p.frac };
-  }
-});
-bezel.addEventListener("pointermove", (e) => {
-  if (!dialDrag || dialDrag.id !== e.pointerId || dialDrag.tap) return;
-  const { frac } = bezelPoint(e);
-  let d = frac - dialDrag.frac;
-  d -= Math.round(d); // the short way round
-  dialDrag.frac = frac;
-  dialDrag.value = Math.max(0, Math.min(720, dialDrag.value + d * 60));
-  setMinutes(snap5(dialDrag.value));
-});
-const endDrag = (e) => {
-  if (!dialDrag || dialDrag.id !== e.pointerId) return;
-  // A tap on the ring (not a drag, which scrolls the page on a phone) jumps the hand there.
-  if (dialDrag.tap && e.type === "pointerup" && Math.hypot(e.clientX - dialDrag.tap[0], e.clientY - dialDrag.tap[1]) < 12) {
-    setMinutes(minutesAt(dialDrag.frac, launch.minutes));
-  }
-  dialDrag = null;
-  dialEl.classList.remove("dragging");
-};
-["pointerup", "pointercancel"].forEach((ev) => bezel.addEventListener(ev, endDrag));
-let wheelAcc = 0;
-bezel.addEventListener("wheel", (e) => {
-  if (!dialIdle()) return;
-  e.preventDefault();
-  wheelAcc += e.deltaMode ? e.deltaY * 40 : e.deltaY;
-  while (Math.abs(wheelAcc) >= 40) {
-    const up = wheelAcc < 0, m = launch.minutes;
-    wheelAcc -= Math.sign(wheelAcc) * 40;
-    setMinutes(up ? Math.floor(m / 5) * 5 + 5 : Math.ceil(m / 5) * 5 - 5);
-  }
-}, { passive: false });
-bezel.addEventListener("keydown", (e) => {
-  if (!dialIdle()) return;
-  const d = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5, PageUp: 60, PageDown: -60 }[e.key];
-  if (d) { e.preventDefault(); setMinutes(launch.minutes + (e.shiftKey ? Math.sign(d) : d)); }
-  if (e.key === "Enter") $("#ignite-btn").click();
+    wheel += e.deltaMode ? e.deltaY * 40 : e.deltaY;
+    while (Math.abs(wheel) >= 40) {
+      const up = wheel < 0, m = get();
+      wheel -= Math.sign(wheel) * 40;
+      set(up ? Math.floor(m / 5) * 5 + 5 : Math.ceil(m / 5) * 5 - 5);
+    }
+  }, { passive: false });
+  svg.addEventListener("keydown", (e) => {
+    if (!live()) return;
+    const d = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5, PageUp: 60, PageDown: -60 }[e.key];
+    if (d) { e.preventDefault(); set(get() + (e.shiftKey ? Math.sign(d) : d)); }
+    if (e.key === "Enter") $("#ignite-btn").click();
+  });
+  return { dragging: () => !!drag };
+}
+
+const mainDial = turnable(bezel, {
+  cx: CX, r: R, inner: 0.72, min: 5, max: 720,
+  get: () => launch.minutes, set: (m) => setMinutes(m),
 });
 
-$$("#tminus [data-delay]").forEach((b) => b.addEventListener("click", () => {
-  launch.delay = Number(b.dataset.delay);
-  ls.setItem("ignition.delay", String(launch.delay));
+/* ---- the T-minus dial: a small one under the big one, in white, the same way round */
+
+const sub = $("#tminus-dial");
+const SUB_R = 74, SUB_C = 100, SUB_RING = 2 * Math.PI * SUB_R;
+$("#sub-ticks").innerHTML = Array.from({ length: 12 }, (_, i) => {
+  const a = (i / 12) * 2 * Math.PI - Math.PI / 2, r1 = i % 3 ? 86 : 83;
+  const p = (r) => [(SUB_C + Math.cos(a) * r).toFixed(2), (SUB_C + Math.sin(a) * r).toFixed(2)];
+  const [x1, y1] = p(r1), [x2, y2] = p(93);
+  return `<line class="${i % 3 ? "" : "major"}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+}).join("");
+
+function setDelay(d) {
+  d = Math.max(0, Math.min(1440, Math.round(d)));
+  if (d === launch.delay) return;
+  launch.delay = d;
+  ls.setItem("ignition.delay", String(d));
   FX.haptic("tick");
   renderIgnite();
-}));
+}
+
+const subDial = turnable(sub, {
+  cx: SUB_C, r: SUB_R, inner: 0.55, min: 0, max: 1440, whole: true,
+  get: () => launch.delay, set: setDelay, centre: () => setDelay(0),
+});
+
+/** T-minus as the dial shows it: "15", or "1:15" from an hour up. */
+const fmtDelay = (d) => (d >= 60 ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, "0")}` : String(d));
+
+function paintDelay() {
+  const d = launch.delay;
+  const lap = d === 0 ? 0 : d % 60 === 0 ? 1 : (d % 60) / 60;
+  const arc = $("#sub-arc");
+  arc.style.strokeDasharray = `${SUB_RING}`;
+  arc.style.strokeDashoffset = `${SUB_RING * (1 - lap)}`;
+  const a = lap * 2 * Math.PI - Math.PI / 2;
+  $("#sub-knob").setAttribute("transform", `translate(${(SUB_C + Math.cos(a) * SUB_R).toFixed(2)} ${(SUB_C + Math.sin(a) * SUB_R).toFixed(2)})`);
+  $$("#sub-ticks line").forEach((t, i) => t.classList.toggle("lit", d > 0 && i < Math.round(lap * 12)));
+  const val = $("#tminus-val");
+  const text = fmtDelay(d);
+  if (val.textContent !== text) val.textContent = text;
+  $("#tminus-unit").textContent = d >= 60 ? "h:min" : "min";
+  $(".subdial").classList.toggle("zero", d === 0);
+  sub.setAttribute("aria-valuenow", d);
+  sub.setAttribute("aria-valuetext", d ? `T-minus ${fmtEstimate(d)}` : "No T-minus");
+}
 
 /* ---- painting the console */
 
@@ -720,9 +772,9 @@ function renderIgnite() {
     paintArc(1);
   } else {
     setReadout(fmtClock(launch.minutes * 60), changed && lastPhase !== null);
-    $("#ignite-sub").textContent = launch.delay ? `Ignite · T−${launch.delay}` : "Ignite";
+    $("#ignite-sub").textContent = launch.delay ? `Ignite · T−${fmtDelay(launch.delay)}` : "Ignite";
     paintSetting();
-    $$("#tminus [data-delay]").forEach((b) => b.classList.toggle("on", Number(b.dataset.delay) === launch.delay));
+    paintDelay();
     $("#abort-rule").textContent = launch.minutes > 60 ? "Hold to end early" : "Locked in. No ending early.";
     $("#abort-rule").classList.toggle("locked", launch.minutes <= 60);
   }

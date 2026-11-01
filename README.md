@@ -105,8 +105,8 @@ That computer gets only the blocker, and follows the burns and block list from t
 ## Using it
 
 **Turn the dial, then tap the middle.** The ring works like a minute hand: drag it round (or tap the ring,
-scroll, or use the arrow keys) to set the length, and keep going past twelve to add hours. Pick a T-minus
-underneath if you want a delay. There's a 3-second countdown (tap again to scrub), then liftoff: everything
+scroll, or use the arrow keys) to set the length, and keep going past twelve to add hours. For a delay, turn
+the small T-minus dial underneath the same way (tap its middle to clear it). There's a 3-second countdown (tap again to scrub), then liftoff: everything
 on your block list is blocked, everywhere, until the ring burns down.
 
 - **A burn of an hour or less can't be ended early.** There's no stop button. It runs out when it runs out.

@@ -38,7 +38,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 ::selection { background: var(--accent); color: #fff; }
 
 /* The label voice: small, spaced-out mono capitals, like stencilling on a panel. */
-.hud-h, .core-sub, .tminus, .abort-rule, .until, .locked-note, .enforcers, .burn-stats .goal-label,
+.hud-h, .core-sub, .abort-rule, .until, .locked-note, .enforcers, .burn-stats .goal-label,
 .field-label, .kpis span, .hero-sub, .meco-kicker, .count, .set-page h3, .done-group summary, .chips.extend > span {
   font-family: var(--mono); text-transform: uppercase; letter-spacing: .18em;
 }
@@ -245,17 +245,28 @@ main { max-width: 860px; margin: 0 auto; padding: 4px 20px 140px; }
 .console.venting .core { filter: saturate(.3); transition: filter 2s linear; }
 
 /* ---------- launch parameters ---------- */
-.launch-params { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 18px; }
-.tminus { display: flex; align-items: center; gap: 6px; font-size: 12px; letter-spacing: .08em; color: var(--muted); }
-.tminus .lbl { padding: 0 4px; }
-.tminus button {
-  min-width: 40px; height: 34px; padding: 0 8px; border-radius: 8px;
-  background: rgba(0, 0, 0, .6); border: 1px solid var(--line-2); color: var(--muted);
-  font: 400 13px/1 var(--mono); letter-spacing: 0; transition: color .2s, border-color .2s, background .2s, transform .3s var(--spring);
+.launch-params { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 6px; }
+/* The T-minus dial: a small sub-dial, white where the burn is red (white is waiting, red is burning). */
+.subdial { position: relative; width: 132px; aspect-ratio: 1; user-select: none; -webkit-user-select: none; }
+.subdial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; stroke: none; touch-action: none; cursor: grab; }
+.subdial svg:focus { outline: none; }
+.subdial.dragging svg { cursor: grabbing; }
+.sub-ticks line { stroke: #2c2c2c; stroke-width: 2; transition: stroke .3s; }
+.sub-ticks line.major { stroke: #555; stroke-width: 3; }
+.sub-ticks line.lit { stroke: #fff; }
+.sub-track { stroke: #161616; stroke-width: 2; }
+.sub-arc { stroke: #fff; stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 465; stroke-dashoffset: 465; transition: stroke-dashoffset .35s var(--ease), opacity .3s; filter: drop-shadow(0 0 4px rgba(255, 255, 255, .5)); }
+.subdial .knob-dot { fill: #fff; filter: drop-shadow(0 0 6px rgba(255, 255, 255, .7)); transition: transform .3s var(--spring); transform-box: fill-box; transform-origin: center; }
+.subdial .knob:hover .knob-dot, .subdial.dragging .knob-dot { transform: scale(1.35); }
+.subdial.zero .sub-arc { opacity: 0; }
+.subdial.zero .knob-dot { fill: #000; stroke: #777; stroke-width: 2; filter: none; }
+.sub-face {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
 }
-.tminus button:hover { color: var(--text); }
-.tminus button:active { transform: scale(.92); }
-.tminus button.on { color: var(--text); border-color: var(--accent); background: var(--accent-dim); box-shadow: 0 0 14px rgba(226, 58, 41, .2); }
+.sub-lbl { font: 10px var(--mono); letter-spacing: .2em; padding-left: .2em; color: var(--muted); text-transform: uppercase; }
+.sub-val { font-size: 30px; font-weight: 400; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--text); transition: color .3s; }
+.subdial.zero .sub-val { color: var(--faint); }
 .abort-rule { margin: 0; font-size: 10.5px; color: var(--faint); display: flex; align-items: center; gap: 8px; }
 .abort-rule::before { content: ""; width: 6px; height: 6px; border: 1px solid var(--faint); border-radius: 1px; }
 .abort-rule.locked::before { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 6px var(--glow); }
@@ -705,8 +716,6 @@ input[type="time"] { color-scheme: dark; font-family: var(--mono); font-size: 14
   .sheet-grip { display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--line-2); margin: 0 auto 12px; }
   .item-extra { padding-left: 2px; }
   .ignite-wrap { padding-top: 1vh; }
-  .tminus { gap: 5px; }
-  .tminus button { min-width: 36px; padding: 0 6px; }
   .lw-trigger, .lw-home { margin-left: 0; }
   /* Phones drill down: the list of sections, or one section. */
   .set-layout { display: block; }

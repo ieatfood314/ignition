@@ -59,12 +59,21 @@ main() {
     git -C "$work" checkout -q --force --detach "$new"
     count=$(git -C "$work" rev-list --count HEAD)
     tag="v$(sed -n 's/^ignitionVersion=//p' "$work/android/gradle.properties").$count"
-    if gh release view "$tag" -R "$repo" >/dev/null 2>&1; then return 0; fi
+    if assets=$(gh release view "$tag" -R "$repo" --json assets -q '.assets[].name' 2>/dev/null); then
+        case $assets in *.apk*) return 0 ;; esac
+        gh release delete "$tag" -R "$repo" --yes --cleanup-tag # half-made last time: no APK on it
+    fi
 
-    echo "building $tag ($(git -C "$work" log -1 --format='%h %s'))"
-    sh "$work/android/build.sh" --no-daemon >/dev/null
+    # A built APK waits here until it's published, so a failed upload is retried without building again.
+    built="$(dirname "$state")/ignition-$tag.apk"
+    if [ ! -f "$built" ]; then
+        rm -f "$(dirname "$state")"/ignition-v*.apk
+        echo "building $tag ($(git -C "$work" log -1 --format='%h %s'))"
+        sh "$work/android/build.sh" --no-daemon >/dev/null
+        cp "$work/android/app/build/outputs/apk/release/app-release.apk" "$built"
+    fi
     out=$(mktemp -d)
-    cp "$work/android/app/build/outputs/apk/release/app-release.apk" "$out/ignition-$tag.apk"
+    cp "$built" "$out/ignition-$tag.apk"
     prev=$(git -C "$work" describe --tags --abbrev=0 --match 'v*' "$new^" 2>/dev/null || true)
     {
         echo "**Install:** download \`ignition-$tag.apk\` below, or get every build automatically through [Obtainium](https://obtainium.imranr.dev/)."
@@ -72,9 +81,13 @@ main() {
         echo "### Changes"
         git -C "$work" log --no-merges --format='- %s' "${prev:+$prev..}$new"
     } >"$out/notes.md"
-    gh release create "$tag" -R "$repo" --target "$new" --title "Ignition $tag" --notes-file "$out/notes.md" \
-        "$out/ignition-$tag.apk"
-    rm -rf "$out"
+    if ! gh release create "$tag" -R "$repo" --target "$new" --title "Ignition $tag" --notes-file "$out/notes.md" \
+        "$out/ignition-$tag.apk"; then
+        rm -rf "$out" "$state" # GitHub unreachable: try the upload again next minute
+        echo "couldn't publish $tag; retrying" >&2
+        exit 1
+    fi
+    rm -rf "$out" "$built"
     echo "released $tag"
 }
 
