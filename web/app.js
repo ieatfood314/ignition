@@ -387,9 +387,9 @@ async function patchItem(id, patch, quiet) {
 function toggleDone(it) {
   const nowDone = !it.done_at;
   const row = $(`.item[data-id="${it.id}"]`);
-  if (row && nowDone) row.classList.add("is-done");
+  if (row && nowDone) { row.classList.add("is-done", "burning-off"); FX.haptic("tick"); }
   state.expanded.delete(it.id);
-  setTimeout(() => patchItem(it.id, { done: nowDone }), nowDone ? 260 : 0);
+  setTimeout(() => patchItem(it.id, { done: nowDone }), nowDone && !FX.reduced ? 620 : 0);
   if (nowDone) toast("Done.", "Undo", () => patchItem(it.id, { done: false }));
 }
 
@@ -455,16 +455,17 @@ $("#add-form").addEventListener("submit", async (e) => {
 
 /* ---------------- ignite ---------------- */
 
-const RING = 2 * Math.PI * 92;
+const R = 176, RING = 2 * Math.PI * R, CX = 200;
 const serverNow = () => Date.now() / 1000 + state.clockOffset;
 let arming = null;
+let lastPhase = null;
 
 // A new version of the page was deployed: reload to pick it up, once nothing is half-done.
 function reloadIfStale(build) {
   if (!build) return; // the Android app updates as a whole
   state.build = state.build || build;
   if (build === state.build) return;
-  const busy = arming || addDialog.open || saveTimer || mecoDialog.open ||
+  const busy = arming || dialDrag || addDialog.open || saveTimer || mecoDialog.open ||
     ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
   if (!busy) location.reload();
 }
@@ -475,13 +476,12 @@ function setIgnite(s, quiet) {
   state.clockOffset = s.now - Date.now() / 1000;
   state.ignite = s;
   if (!quiet && was.session && was.phase === "countdown" && s.phase === "burning" && s.session && s.session.id === was.session.id) {
-    toast("Liftoff.");
-    if (navigator.vibrate) navigator.vibrate([60, 60, 200]);
+    liftoff();
   }
   if (!quiet && was.phase === "burning" && s.phase === "idle" && !state.stopping &&
       serverNow() >= was.session.ends_at - 2 && serverNow() - was.session.ends_at < 15 * 60) {
     showCutoff(was.session);
-    if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
+    FX.haptic("reject");
   }
   state.stopping = false;
   renderIgnite();
@@ -498,27 +498,196 @@ async function igniteAction(path, body, okToast) {
   } catch (e) { toast(e.message); }
 }
 
+/** Liftoff: the warp, the flash, the console kicking under you. */
+function liftoff(text = "Liftoff.") {
+  FX.liftoff();
+  FX.replay($("#dial"), "kick");
+  toast(text);
+}
+
+/* ---- the dial: the bezel sets the burn length like a minute hand; each lap round adds an hour */
+
+const dialEl = $("#dial"), bezel = $("#bezel");
+const launch = {
+  minutes: Math.min(720, Math.max(1, parseInt(ls.getItem("ignition.minutes"), 10) || 50)),
+  delay: [0, 5, 10, 15, 30, 60].includes(parseInt(ls.getItem("ignition.delay"), 10)) ? parseInt(ls.getItem("ignition.delay"), 10) : 0,
+};
+let dialDrag = null;
+
+const polar = (frac, r) => {
+  const a = frac * 2 * Math.PI - Math.PI / 2;
+  return [CX + Math.cos(a) * r, CX + Math.sin(a) * r];
+};
+
+$("#ticks").innerHTML = Array.from({ length: 60 }, (_, i) => {
+  const major = i % 5 === 0;
+  const [x1, y1] = polar(i / 60, major ? 184 : 188);
+  const [x2, y2] = polar(i / 60, 197);
+  return `<line class="${major ? "major" : ""}" style="--i:${i}" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"/>`;
+}).join("");
+const ticks = $$("#ticks line");
+
+function paintTicks(frac, cls = "lit") {
+  const n = Math.round(frac * 60);
+  ticks.forEach((t, i) => t.classList.toggle(cls, i < n));
+}
+
+/** The arc from twelve o'clock round to `frac` of the ring, and the bright head at its end. */
+function paintArc(frac) {
+  frac = Math.max(0, Math.min(1, frac));
+  const fill = $("#ring-fill");
+  fill.style.strokeDasharray = `${RING}`;
+  fill.style.strokeDashoffset = `${RING * (1 - frac)}`;
+  const [x, y] = polar(frac, R);
+  const halo = $(".halo", bezel);
+  halo.style.strokeDasharray = `${RING}`;
+  halo.style.strokeDashoffset = `${RING * (1 - frac)}`;
+  const head = $("#head");
+  head.setAttribute("cx", x.toFixed(2));
+  head.setAttribute("cy", y.toFixed(2));
+  return [x, y];
+}
+
+function paintSetting() {
+  const m = launch.minutes;
+  const lap = m % 60 === 0 ? 1 : (m % 60) / 60;
+  const [x, y] = paintArc(lap);
+  $("#knob").setAttribute("transform", `translate(${x.toFixed(2)} ${y.toFixed(2)})`);
+  paintTicks(lap);
+  // One pip per full hour, in a short arc under twelve o'clock.
+  const hours = Math.floor((m - 1) / 60);
+  $("#pips").innerHTML = Array.from({ length: hours }, (_, i) => {
+    const [px, py] = polar((i - (hours - 1) / 2) * 0.022, 158);
+    return `<circle cx="${px.toFixed(2)}" cy="${py.toFixed(2)}" r="3"/>`;
+  }).join("");
+  bezel.setAttribute("aria-valuenow", m);
+  bezel.setAttribute("aria-valuetext", fmtEstimate(m));
+}
+
+function setMinutes(m, tick = true) {
+  m = Math.max(1, Math.min(720, Math.round(m)));
+  if (m === launch.minutes) return;
+  launch.minutes = m;
+  ls.setItem("ignition.minutes", String(m));
+  if (tick) FX.haptic("tick");
+  renderIgnite();
+}
+
+/** Where on the bezel a pointer is: 0..1 round from twelve o'clock, and how far out (0 centre, 1 the track). */
+function bezelPoint(e) {
+  const r = bezel.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width * 400 - CX, y = (e.clientY - r.top) / r.height * 400 - CX;
+  let a = Math.atan2(y, x) + Math.PI / 2;
+  if (a < 0) a += 2 * Math.PI;
+  return { frac: a / (2 * Math.PI), dist: Math.hypot(x, y) / R };
+}
+
+/** A jump to a spot on the ring: that minute past whichever hour is nearest to where the dial is now. */
+function minutesAt(frac, prev) {
+  let best = frac * 60;
+  for (let h = 1; h < 12; h++) {
+    const m = h * 60 + frac * 60;
+    if (Math.abs(m - prev) < Math.abs(best - prev)) best = m;
+  }
+  return snap5(best);
+}
+const snap5 = (m) => Math.max(5, Math.min(720, Math.round(m / 5) * 5));
+
+const dialIdle = () => state.ignite.phase === "idle" && !arming;
+
+bezel.addEventListener("pointerdown", (e) => {
+  if (!dialIdle()) return;
+  const p = bezelPoint(e);
+  if (p.dist < 0.72) return; // that's the core
+  const onKnob = e.target.closest(".knob");
+  if (onKnob || e.pointerType === "mouse") {
+    e.preventDefault();
+    bezel.setPointerCapture(e.pointerId);
+    if (!onKnob) setMinutes(minutesAt(p.frac, launch.minutes));
+    // Turning winds a running total, so going round past twelve adds (or takes off) an hour.
+    dialDrag = { id: e.pointerId, frac: p.frac, value: launch.minutes };
+    dialEl.classList.add("dragging");
+  } else {
+    dialDrag = { id: e.pointerId, tap: [e.clientX, e.clientY], frac: p.frac };
+  }
+});
+bezel.addEventListener("pointermove", (e) => {
+  if (!dialDrag || dialDrag.id !== e.pointerId || dialDrag.tap) return;
+  const { frac } = bezelPoint(e);
+  let d = frac - dialDrag.frac;
+  d -= Math.round(d); // the short way round
+  dialDrag.frac = frac;
+  dialDrag.value = Math.max(0, Math.min(720, dialDrag.value + d * 60));
+  setMinutes(snap5(dialDrag.value));
+});
+const endDrag = (e) => {
+  if (!dialDrag || dialDrag.id !== e.pointerId) return;
+  // A tap on the ring (not a drag, which scrolls the page on a phone) jumps the hand there.
+  if (dialDrag.tap && e.type === "pointerup" && Math.hypot(e.clientX - dialDrag.tap[0], e.clientY - dialDrag.tap[1]) < 12) {
+    setMinutes(minutesAt(dialDrag.frac, launch.minutes));
+  }
+  dialDrag = null;
+  dialEl.classList.remove("dragging");
+};
+["pointerup", "pointercancel"].forEach((ev) => bezel.addEventListener(ev, endDrag));
+let wheelAcc = 0;
+bezel.addEventListener("wheel", (e) => {
+  if (!dialIdle()) return;
+  e.preventDefault();
+  wheelAcc += e.deltaMode ? e.deltaY * 40 : e.deltaY;
+  while (Math.abs(wheelAcc) >= 40) {
+    const up = wheelAcc < 0, m = launch.minutes;
+    wheelAcc -= Math.sign(wheelAcc) * 40;
+    setMinutes(up ? Math.floor(m / 5) * 5 + 5 : Math.ceil(m / 5) * 5 - 5);
+  }
+}, { passive: false });
+bezel.addEventListener("keydown", (e) => {
+  if (!dialIdle()) return;
+  const d = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5, PageUp: 60, PageDown: -60 }[e.key];
+  if (d) { e.preventDefault(); setMinutes(launch.minutes + (e.shiftKey ? Math.sign(d) : d)); }
+  if (e.key === "Enter") $("#ignite-btn").click();
+});
+
+$$("#tminus [data-delay]").forEach((b) => b.addEventListener("click", () => {
+  launch.delay = Number(b.dataset.delay);
+  ls.setItem("ignition.delay", String(launch.delay));
+  FX.haptic("tick");
+  renderIgnite();
+}));
+
+/* ---- painting the console */
+
+function setReadout(text, decode) {
+  const el = $("#ignite-label");
+  if (el.dataset.text === text) return false;
+  el.dataset.text = text;
+  el.dataset.len = text.length > 7 ? "xl" : text.length > 5 ? "l" : text.length > 2 ? "m" : "s";
+  if (decode) FX.decode(el, text); else el.textContent = text;
+  return true;
+}
+
 function renderIgnite() {
   const s = state.ignite;
   const sess = s.session;
   const t = serverNow();
-  const dial = $("#dial");
   const phase = s.phase || (s.active ? "burning" : "idle");
-  dial.classList.toggle("active", phase === "burning");
-  dial.classList.toggle("countdown", phase === "countdown");
-  dial.classList.toggle("arming", !!arming);
+  const look = arming ? "arming" : phase;
+  const changed = look !== lastPhase;
+  dialEl.dataset.phase = look;
+  document.documentElement.dataset.phase = look;
   $("#launch-params").hidden = phase !== "idle";
   $("#session-info").hidden = phase === "idle";
-  const fill = $("#ring-fill");
-  fill.style.strokeDasharray = RING;
-  let tabLabel = "Ignite", barFrac = null;
+  bezel.tabIndex = phase === "idle" ? 0 : -1;
+  let tabLabel = "Ignite", barFrac = null, emit = null;
 
   if (phase === "burning") {
     const remaining = sess.ends_at - t;
     const total = sess.ends_at - sess.starts_at;
-    $("#ignite-label").textContent = fmtClock(remaining);
-    $("#ignite-sub").textContent = "burning";
-    fill.style.strokeDashoffset = RING * (1 - remaining / total);
+    setReadout(fmtClock(remaining), changed);
+    $("#ignite-sub").textContent = "Burning";
+    const frac = remaining / total;
+    emit = paintArc(frac);
+    paintTicks(frac);
     $("#until").textContent = `Locked until ${fmtTime(sess.ends_at)}`;
     $("#extend").hidden = false;
     $("#stop-btn").hidden = !s.can_stop;
@@ -526,14 +695,16 @@ function renderIgnite() {
     $("#locked-note").textContent = "No way out. Get to work.";
     $("#scrub-btn").hidden = true;
     tabLabel = fmtClock(remaining);
-    barFrac = 1 - remaining / total;
+    barFrac = 1 - frac;
   } else if (phase === "countdown") {
     const left = sess.starts_at - t;
     const total = Math.max(1, sess.starts_at - sess.created_at);
-    $("#ignite-label").textContent = `T–${fmtClock(left)}`;
-    $("#ignite-sub").textContent = "tap to ignite now";
-    fill.style.strokeDashoffset = RING * (1 - Math.min(1, left / total));
-    $("#until").textContent = `Ignition at ${fmtTime(sess.starts_at)} · ${fmtEstimate(sess.minutes)} burn`;
+    setReadout(`T−${fmtClock(left)}`, changed);
+    $("#ignite-sub").textContent = "Ignite now";
+    const frac = Math.min(1, left / total);
+    paintArc(frac);
+    paintTicks(frac);
+    $("#until").textContent = `Ignition ${fmtTime(sess.starts_at)} · ${fmtEstimate(sess.minutes)} burn`;
     $("#extend").hidden = true;
     $("#stop-btn").hidden = true;
     // Under an hour to liftoff it's committed, bar a minute's grace right after setting it.
@@ -542,23 +713,32 @@ function renderIgnite() {
     $("#locked-note").textContent = "Committed. No scrubbing now.";
     $("#scrub-btn").hidden = scrubLeft <= 0;
     $("#scrub-btn").textContent = scrubLeft <= 3600 ? `Scrub launch · ${fmtClock(scrubLeft)}` : "Scrub launch";
-    tabLabel = `T–${fmtClock(left)}`;
+    tabLabel = `T−${fmtClock(left)}`;
   } else if (arming) {
-    $("#ignite-label").textContent = arming.count;
-    $("#ignite-sub").textContent = "tap to scrub";
-    fill.style.strokeDashoffset = RING;
+    if (setReadout(String(arming.count))) FX.replay($("#ignite-label"), "slam");
+    $("#ignite-sub").textContent = "Tap to scrub";
+    paintArc(1);
   } else {
-    $("#ignite-label").textContent = "IGNITE";
-    $("#ignite-sub").textContent = "";
-    fill.style.strokeDashoffset = RING;
+    setReadout(fmtClock(launch.minutes * 60), changed && lastPhase !== null);
+    $("#ignite-sub").textContent = launch.delay ? `Ignite · T−${launch.delay}` : "Ignite";
+    paintSetting();
+    $$("#tminus [data-delay]").forEach((b) => b.classList.toggle("on", Number(b.dataset.delay) === launch.delay));
+    $("#abort-rule").textContent = launch.minutes > 60 ? "Hold to end early" : "Locked in. No ending early.";
+    $("#abort-rule").classList.toggle("locked", launch.minutes <= 60);
   }
+  lastPhase = look;
+
+  FX.mode(look);
+  emitAt = emit;
+  aimEmbers();
 
   const bar = $("#burnbar");
   bar.hidden = barFrac == null;
   if (barFrac != null) $("div", bar).style.width = `${100 * barFrac}%`;
   const tab = $('.tabs a[data-tab="ignite"]');
   tab.classList.toggle("burning", phase !== "idle");
-  $("#tab-ignite-label").textContent = tabLabel;
+  const tabLbl = $("#tab-ignite-label");
+  if (tabLbl.textContent !== tabLabel) { tabLbl.textContent = tabLabel; moveTabInd(); }
 
   renderBurnStats(s.stats);
   renderNextSchedule(s.next_schedule, phase);
@@ -567,10 +747,34 @@ function renderIgnite() {
   $("#enforcers").innerHTML = (s.enforcers || []).map((e) => {
     const stale = e.age > 30;
     const armed = !stale && e.status && e.status.armed;
-    const label = stale ? "offline" : armed ? "locked" : phase === "burning" ? "arming…" : "ready";
+    const label = stale ? "offline" : armed ? "locked" : phase === "burning" ? "arming" : "ready";
     const err = !stale && e.status && e.status.error ? ` title="${esc(e.status.error)}"` : "";
-    return `<li class="${stale ? "stale" : armed ? "armed" : "ready"}"${err}>${esc(e.host)} · ${label}${err ? " ⚠" : ""}</li>`;
+    return `<li class="${stale ? "stale" : armed ? "armed" : "ready"}"${err}><b>${esc(e.host)}</b><span>${label}${err ? " ⚠" : ""}</span></li>`;
   }).join("");
+}
+
+/** Embers fly off the head of the ring while it burns down, outward and away. */
+let emitAt = null;
+function aimEmbers() {
+  if (!emitAt || state.page !== "ignite") { FX.emitter(null); return; }
+  const r = bezel.getBoundingClientRect();
+  const k = r.width / 400;
+  FX.emitter({ x: r.left + emitAt[0] * k, y: r.top + emitAt[1] * k, dx: (emitAt[0] - CX) / R, dy: (emitAt[1] - CX) / R });
+}
+
+/** Keep the starfield's vanishing point on the dial, wherever the page has put it. */
+function aimSky() {
+  if (state.page !== "ignite") { FX.focus(window.innerWidth / 2, window.innerHeight * 0.4); return; }
+  const r = bezel.getBoundingClientRect();
+  if (r.width) FX.focus(r.left + r.width / 2, r.top + r.height / 2);
+}
+window.addEventListener("scroll", () => { aimSky(); aimEmbers(); }, { passive: true });
+window.addEventListener("resize", () => { aimSky(); aimEmbers(); });
+
+/** Fuel-gauge style: a row of cells, lit up to how far you've got. */
+function gauge(frac) {
+  const n = 24, lit = Math.round(Math.min(1, frac) * n);
+  return `<span class="gauge">${Array.from({ length: n }, (_, i) => `<i class="${i < lit ? "on" : ""}" style="--i:${i}"></i>`).join("")}</span>`;
 }
 
 function renderBurnStats(st) {
@@ -579,12 +783,13 @@ function renderBurnStats(st) {
   const goals = st.goals || {};
   const row = (label, sec, goalMin, unit) => {
     if (!goalMin) return "";
-    const frac = Math.min(1, sec / 60 / goalMin);
-    const val = unit === "h" ? `${(sec / 3600).toFixed(1).replace(/\.0$/, "")} / ${(goalMin / 60).toFixed(1).replace(/\.0$/, "")} h` : `${Math.round(sec / 60)} / ${goalMin} min`;
-    return `<div class="goal${frac >= 1 ? " met" : ""}"><span class="goal-label">${label}</span><span class="goal-bar"><i style="width:${frac * 100}%"></i></span><span class="goal-val">${val}</span></div>`;
+    const frac = sec / 60 / goalMin;
+    const val = unit === "h" ? `${(sec / 3600).toFixed(1).replace(/\.0$/, "")}/${(goalMin / 60).toFixed(1).replace(/\.0$/, "")} h` : `${Math.round(sec / 60)}/${goalMin} min`;
+    return `<div class="goal${frac >= 1 ? " met" : ""}"><span class="goal-label">${label}</span>${gauge(frac)}<span class="goal-val">${val}</span></div>`;
   };
-  const rows = row("Today", st.today, goals.daily, "m") + row("This week", st.week, goals.weekly, "h");
-  box.innerHTML = rows || `<p class="burned">Burned today ${fmtDuration(st.today)} · this week ${fmtDuration(st.week)} · <a class="link" href="#settings/goals">set goals</a></p>`;
+  const rows = row("Today", st.today, goals.daily, "m") + row("Week", st.week, goals.weekly, "h");
+  const html = rows || `<p class="burned">Today ${fmtDuration(st.today)} · week ${fmtDuration(st.week)} · <a class="link" href="#settings/goals">set goals</a></p>`;
+  if (box.dataset.html !== html) { box.dataset.html = html; box.innerHTML = html; }
 }
 
 function renderNextSchedule(ns, phase) {
@@ -592,7 +797,7 @@ function renderNextSchedule(ns, phase) {
   if (!ns || phase !== "idle") { el.hidden = true; return; }
   el.hidden = false;
   el.innerHTML = `Next launch ${esc(fmtWhen(ns.at))} · ${fmtEstimate(ns.minutes)} <button type="button" class="link">skip</button>`;
-  $("button", el).onclick = () => igniteAction("/api/ignite/skip", { schedule_id: ns.schedule_id, date: ns.date }, "Launch window skipped.");
+  $("button", el).onclick = () => igniteAction("/api/ignite/skip", { schedule_id: ns.schedule_id, date: ns.date }, "Launch skipped.");
 }
 
 /** The launch window (Settings › Launch window), if it's open right now. */
@@ -611,15 +816,15 @@ function renderWindowNote(phase) {
   const lw = phase === "idle" && !arming ? openWindow() : null;
   el.hidden = !lw;
   if (!lw) return;
-  const label = lw.tminus ? `Start T-minus ${lw.tminus}` : "Ignite now";
+  const label = lw.tminus ? `Start T−${lw.tminus}` : "Ignite now";
   const key = `${lw.until}|${label}|${lw.minutes}`;
   if (el.dataset.key === key) return;
   el.dataset.key = key;
-  el.innerHTML = `Launch window open until ${esc(fmtTime(lw.until))}. <button type="button" class="link">${esc(label)}</button> <span>· ${fmtEstimate(lw.minutes)} burn</span>`;
+  el.innerHTML = `Launch window open till ${esc(fmtTime(lw.until))} <button type="button" class="link">${esc(label)}</button> <span>· ${fmtEstimate(lw.minutes)}</span>`;
   $("button", el).onclick = async () => {
     try {
       setIgnite(await api("POST", "/api/ignite", { minutes: lw.minutes, delay: lw.tminus }), true);
-      toast(lw.tminus ? `Countdown started. Ignition in T-minus ${lw.tminus}.` : "Liftoff.");
+      if (lw.tminus) toast(`Countdown started. T−${lw.tminus}.`); else liftoff();
     } catch (e) { toast(e.message); }
   };
 }
@@ -639,30 +844,30 @@ async function loadSettings() {
 $("#ignite-btn").addEventListener("click", () => {
   const phase = state.ignite.phase;
   if (phase === "burning") return;
-  if (phase === "countdown") { igniteAction("/api/ignite/now", null, "Liftoff."); return; }
+  if (phase === "countdown") {
+    api("POST", "/api/ignite/now").then((r) => { setIgnite(r, true); liftoff(); }, (e) => toast(e.message));
+    return;
+  }
   if (arming) {
     clearInterval(arming.timer);
     arming = null;
+    FX.haptic("reject");
+    toast("Scrubbed.");
     renderIgnite();
     return;
   }
-  const minutes = parseInt($("#minutes").value, 10);
-  const delay = parseInt($("#delay").value || "0", 10) || 0;
-  if (!(minutes >= 1 && minutes <= 720)) { toast("Minutes: 1–720"); $("#minutes").focus(); return; }
-  if (!(delay >= 0 && delay <= 1440)) { toast("T-minus: 0–1440 minutes"); $("#delay").focus(); return; }
-  ls.setItem("ignition.minutes", String(minutes));
-  ls.setItem("ignition.delay", String(delay));
+  const { minutes, delay } = launch;
   arming = { count: 3, minutes, delay };
+  FX.spool(3);
   arming.timer = setInterval(async () => {
     arming.count -= 1;
-    if (arming.count > 0) { renderIgnite(); return; }
+    if (arming.count > 0) { FX.spool(arming.count); renderIgnite(); return; }
     clearInterval(arming.timer);
     const { minutes: m, delay: d } = arming;
     arming = null;
     try {
       setIgnite(await api("POST", "/api/ignite", { minutes: m, delay: d }), true);
-      toast(d ? `Countdown started. Ignition in T-minus ${d}.` : "Liftoff.");
-      if (navigator.vibrate) navigator.vibrate(60);
+      if (d) { FX.haptic("confirm"); toast(`Countdown started. T−${d}.`); } else liftoff();
     } catch (e) {
       toast(e.message);
       renderIgnite();
@@ -671,37 +876,26 @@ $("#ignite-btn").addEventListener("click", () => {
   renderIgnite();
 });
 
-for (const [id, key] of [["#minutes", "ignition.minutes"], ["#delay", "ignition.delay"]]) {
-  const saved = ls.getItem(key);
-  if (saved) $(id).value = saved;
-  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") $("#ignite-btn").click(); });
-}
-
-$$("[data-extend]").forEach((b) => b.addEventListener("click", () =>
-  igniteAction("/api/ignite/extend", { minutes: Number(b.dataset.extend) }, `Extended ${b.dataset.extend} min.`)));
+$$("[data-extend]").forEach((b) => b.addEventListener("click", () => {
+  FX.haptic("tick");
+  FX.replay($("#dial"), "boost");
+  igniteAction("/api/ignite/extend", { minutes: Number(b.dataset.extend) }, `+${b.dataset.extend} min.`);
+}));
 $("#scrub-btn").addEventListener("click", () => igniteAction("/api/ignite/scrub", null, "Launch scrubbed."));
-
-$("#info-btn").addEventListener("click", (e) => {
-  e.stopPropagation();
-  const pop = $("#info-pop");
-  pop.hidden = !pop.hidden;
-  $("#info-btn").setAttribute("aria-expanded", String(!pop.hidden));
-});
-document.addEventListener("click", (e) => {
-  if (!e.target.closest("#info-pop")) { $("#info-pop").hidden = true; $("#info-btn").setAttribute("aria-expanded", "false"); }
-});
 
 (() => {
   const btn = $("#stop-btn");
   let t;
-  const cancel = () => { clearTimeout(t); btn.classList.remove("holding"); };
+  const cancel = () => { clearTimeout(t); btn.classList.remove("holding"); dialEl.classList.remove("venting"); };
   btn.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     btn.classList.add("holding");
+    dialEl.classList.add("venting");
+    FX.haptic("heavy");
     t = setTimeout(async () => {
-      btn.classList.remove("holding");
+      cancel();
       state.stopping = true;
-      try { setIgnite(await api("POST", "/api/ignite/stop"), true); toast("Engines off. Burn ended early."); }
+      try { setIgnite(await api("POST", "/api/ignite/stop"), true); FX.cutoff(); toast("Engines off. Ended early."); }
       catch (err) { state.stopping = false; toast(err.message); }
     }, 2000);
   });
@@ -1083,6 +1277,7 @@ function showCutoff(sess) {
   $("#meco-title").textContent = `${plural(mins, "minute")} burned.`;
   secondStage = sess.planned || mins;
   paintSecond();
+  FX.cutoff();
   if (!mecoDialog.open) mecoDialog.showModal();
 }
 
@@ -1094,8 +1289,7 @@ $("#meco-go").onclick = async () => {
   mecoDialog.close();
   try {
     setIgnite(await api("POST", "/api/ignite", { minutes: secondStage }), true);
-    toast("Second stage ignition.");
-    if (navigator.vibrate) navigator.vibrate(60);
+    liftoff("Second stage ignition.");
   } catch (e) { toast(e.message); }
 };
 
@@ -1103,6 +1297,7 @@ $("#meco-go").onclick = async () => {
 
 // The server hands over raw burns; they're bucketed here, so days and hours are in this device's timezone.
 let burnsData = null;
+let statsKey = "";
 let logShown = 12;
 state.range = ["week", "month", "year", "all"].includes(ls.getItem("ignition.range")) ? ls.getItem("ignition.range") : "week";
 
@@ -1221,7 +1416,7 @@ function barsSvg(buckets, goal, W, title) {
   const bw = Math.min(24, Math.max(2, slot - Math.max(2, slot * 0.35)));
   buckets.forEach((b, i) => {
     const h = b.sec ? Math.max(2, base - y(b.sec)) : 0;
-    out += `<g class="mark" data-tip="${esc(fmtTotal(b.sec))}" data-sub="${esc(b.tip)}"><rect class="hit" x="${i * slot}" y="${top}" width="${slot}" height="${base - top}"/>`;
+    out += `<g class="mark" style="--i:${i}" data-tip="${esc(fmtTotal(b.sec))}" data-sub="${esc(b.tip)}"><rect class="hit" x="${i * slot}" y="${top}" width="${slot}" height="${base - top}"/>`;
     if (h) out += `<path class="bar${goal && b.sec >= goal ? " met" : ""}" d="${barPath(i * slot + (slot - bw) / 2, base, bw, h)}"/>`;
     out += "</g>";
   });
@@ -1245,7 +1440,7 @@ function heatSvg(grid, W) {
     out += `<text x="0" y="${r * rh + rh / 2 + 3.5}">${DAY_LETTERS[r]}</text>`;
     row.forEach((v, h) => {
       const level = v ? Math.ceil((v / max) * 4) : 0;
-      out += `<rect class="cell l${level}" x="${left + h * cw + 1}" y="${r * rh + 1}" width="${cw - 2}" height="${rh - 2}" rx="2" data-tip="${esc(fmtTotal(v))}" data-sub="${esc(`${weekdayName(r)}, ${fmtHour(h)}`)}"/>`;
+      out += `<rect class="cell l${level}" style="--d:${r + h}" x="${left + h * cw + 1}" y="${r * rh + 1}" width="${cw - 2}" height="${rh - 2}" rx="2" data-tip="${esc(fmtTotal(v))}" data-sub="${esc(`${weekdayName(r)}, ${fmtHour(h)}`)}"/>`;
     });
   });
   for (const h of [0, 6, 12, 18]) out += `<text x="${left + h * cw + 1}" y="${H - 4}">${esc(fmtHour(h))}</text>`;
@@ -1262,7 +1457,15 @@ function renderStats() {
   hideTip();
   const st = crunch(state.range, burns, now);
 
-  $("#st-total").textContent = fmtTotal(st.total);
+  const fresh = statsKey !== `${state.range}|${burns.length}`;
+  statsKey = `${state.range}|${burns.length}`;
+  if (fresh) {
+    FX.countUp($("#st-total"), st.total, (v) => fmtTotal(Math.round(v / 60) * 60));
+    FX.replay($("#stats"), "drawn");
+  } else {
+    $("#stats").classList.remove("drawn");
+    $("#st-total").textContent = fmtTotal(st.total);
+  }
   $("#st-span").textContent = st.span;
   $("#st-avg").textContent = fmtDuration(st.total / st.days);
   $("#st-count").textContent = st.list.length;
@@ -1348,6 +1551,17 @@ window.addEventListener("scroll", hideTip, { passive: true });
 
 const TABS = ["ignite", "need", "want", "stats"];
 
+/** The little bar under (or over, on a phone) the open tab, sliding across when you switch. */
+function moveTabInd() {
+  const a = $(".tabs a.active"), ind = $(".tab-ind");
+  ind.classList.toggle("off", !a);
+  if (!a) return;
+  ind.style.transform = `translateX(${a.offsetLeft}px)`;
+  ind.style.width = `${a.offsetWidth}px`;
+}
+window.addEventListener("resize", moveTabInd);
+if (document.fonts) document.fonts.ready.then(moveTabInd);
+
 // Ignite is home: the app opens on the button, and the lists sit behind it. Settings is a page of its
 // own (#settings/<section>) that goes back to whichever tab you came from.
 function route() {
@@ -1361,6 +1575,18 @@ function route() {
   hideTip();
   $$(".page").forEach((p) => { p.hidden = p.id !== `page-${page}`; });
   $$(".tabs a").forEach((a) => a.classList.toggle("active", a.dataset.tab === page));
+  moveTabInd();
+  if (was !== page) {
+    const el = $(`#page-${page}`);
+    FX.replay(el, "enter");
+    clearTimeout(el.enterTimer);
+    el.enterTimer = setTimeout(() => el.classList.remove("enter"), 1000);
+    const h = $("h1", el);
+    if (h && page !== "settings") FX.decode(h, h.textContent);
+  }
+  document.documentElement.dataset.page = page;
+  FX.dim(page === "ignite" ? 1 : 0.45);
+  requestAnimationFrame(() => { aimSky(); aimEmbers(); });
   $("#settings-btn").classList.toggle("active", page === "settings");
   $("#fab").hidden = page !== "need" && page !== "want";
   $("#fab").setAttribute("aria-label", page === "want" ? "Add something you want to do" : "Add something that needs doing");

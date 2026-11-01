@@ -10,9 +10,13 @@
   <link rel="icon" href="favicon.ico?v=2" sizes="any">
   <link rel="icon" href="icon.svg?v=2" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-192.png?v=2">
+  <link rel="preload" href="fonts/SpaceGrotesk.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/SpaceMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div id="flash" aria-hidden="true"></div>
   <div id="burnbar" hidden><div></div></div>
 
   <header class="top">
@@ -25,6 +29,7 @@
       <a href="#need" data-tab="need"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Need</span></a>
       <a href="#want" data-tab="want"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><span>Want</span></a>
       <a href="#stats" data-tab="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-7M12 20V5M19 20v-10"/></svg><span>Stats</span></a>
+      <i class="tab-ind" aria-hidden="true"></i>
     </nav>
     <a class="icon-btn" id="settings-btn" href="#settings" aria-label="Settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
@@ -34,47 +39,43 @@
   <main>
     <section id="page-ignite" class="page" hidden>
       <div class="ignite-wrap">
-        <div class="dial" id="dial">
-          <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
-            <circle class="ring-track" cx="100" cy="100" r="92"/>
-            <circle class="ring-fill" id="ring-fill" cx="100" cy="100" r="92"/>
+        <div class="console" id="dial">
+          <svg class="bezel" id="bezel" viewBox="0 0 400 400" role="slider" tabindex="0" aria-label="Burn length"
+               aria-valuemin="1" aria-valuemax="720" aria-valuenow="50">
+            <circle class="halo" cx="200" cy="200" r="176" transform="rotate(-90 200 200)"/>
+            <g class="ticks" id="ticks"></g>
+            <circle class="track" cx="200" cy="200" r="176"/>
+            <circle class="arc" id="ring-fill" cx="200" cy="200" r="176" transform="rotate(-90 200 200)"/>
+            <g class="pips" id="pips"></g>
+            <circle class="head" id="head" cx="200" cy="24" r="5"/>
+            <g class="knob" id="knob"><circle class="knob-hit" r="30"/><circle class="knob-ring" r="13"/><circle class="knob-dot" r="6"/></g>
           </svg>
-          <button class="ignite-btn" id="ignite-btn" type="button">
-            <span class="ignite-face">
-              <span class="ignite-label" id="ignite-label">IGNITE</span>
-              <span class="ignite-sub" id="ignite-sub"></span>
-            </span>
+          <button class="core" id="ignite-btn" type="button">
+            <span class="core-rings" aria-hidden="true"></span>
+            <svg class="core-flame" viewBox="0 0 512 512" aria-hidden="true"><path class="flame" d=""/></svg>
+            <span class="readout" id="ignite-label">50:00</span>
+            <span class="core-sub" id="ignite-sub">Ignite</span>
           </button>
         </div>
 
         <div class="launch-params" id="launch-params">
-          <div class="duration">
-            <label for="minutes">for</label>
-            <input id="minutes" type="number" inputmode="numeric" min="1" max="720" list="minute-presets" value="50">
-            <datalist id="minute-presets">
-              <option value="25"><option value="45"><option value="50"><option value="60"><option value="90"><option value="120">
-            </datalist>
-            <span>min</span>
-            <button class="info-btn" id="info-btn" type="button" aria-label="About ending early" aria-expanded="false">i</button>
-            <div class="popover" id="info-pop" role="tooltip" hidden>
-              Over an hour, you can end a burn early by holding a button.
-              An hour or less, you're locked in until it burns out.
-            </div>
+          <div class="tminus" id="tminus" role="group" aria-label="T-minus, in minutes">
+            <span class="lbl">T−</span>
+            <button type="button" data-delay="0">0</button>
+            <button type="button" data-delay="5">5</button>
+            <button type="button" data-delay="10">10</button>
+            <button type="button" data-delay="15">15</button>
+            <button type="button" data-delay="30">30</button>
+            <button type="button" data-delay="60">60</button>
+            <span class="lbl">min</span>
           </div>
-          <div class="duration tminus">
-            <label for="delay">T-minus</label>
-            <input id="delay" type="number" inputmode="numeric" min="0" max="1440" list="delay-presets" value="0">
-            <datalist id="delay-presets">
-              <option value="0"><option value="5"><option value="10"><option value="15"><option value="30">
-            </datalist>
-            <span>min</span>
-          </div>
+          <p class="abort-rule" id="abort-rule"></p>
         </div>
 
         <div class="session-info" id="session-info" hidden>
           <p class="until" id="until"></p>
           <div class="chips extend" id="extend" hidden>
-            <span>Extend</span>
+            <span>Add</span>
             <button type="button" data-extend="5">+5</button>
             <button type="button" data-extend="15">+15</button>
             <button type="button" data-extend="30">+30</button>
@@ -84,13 +85,15 @@
           <p class="locked-note" id="locked-note" hidden>No way out. Get to work.</p>
         </div>
 
-        <p class="window-note" id="window-note" hidden></p>
-        <div class="burn-stats" id="burn-stats"></div>
-        <p class="next-sched" id="next-sched" hidden></p>
-        <ul class="enforcers" id="enforcers"></ul>
+        <div class="telemetry">
+          <p class="window-note" id="window-note" hidden></p>
+          <div class="burn-stats" id="burn-stats"></div>
+          <p class="next-sched" id="next-sched" hidden></p>
+          <ul class="enforcers" id="enforcers"></ul>
+        </div>
 
         <div class="up-next" id="up-next" hidden>
-          <h2>Up next</h2>
+          <h2 class="hud-h"><span>Up next</span></h2>
           <ul></ul>
         </div>
       </div>
@@ -141,11 +144,11 @@
           <div><b id="st-count"></b><span id="st-count-label">burns</span></div>
           <div><b id="st-streak"></b><span>day streak</span></div>
         </div>
-        <h2 class="st-h"><span id="st-bars-title">Per day</span></h2>
+        <h2 class="st-h hud-h"><span id="st-bars-title">Per day</span></h2>
         <div class="chart" id="st-bars"></div>
-        <h2 class="st-h"><span>When</span><span class="st-note" id="st-peak"></span></h2>
+        <h2 class="st-h hud-h"><span>When</span><span class="st-note" id="st-peak"></span></h2>
         <div class="chart" id="st-heat"></div>
-        <h2 class="st-h"><span>Burns</span></h2>
+        <h2 class="st-h hud-h"><span>Burns</span></h2>
         <ul class="burn-log" id="st-log"></ul>
         <button type="button" class="ghost small st-more" id="st-more" hidden>Show more</button>
       </div>
@@ -284,8 +287,9 @@
 
   <dialog id="meco-dialog" class="sheet meco">
     <div class="sheet-grip" aria-hidden="true"></div>
+    <svg class="meco-flame" viewBox="0 0 512 512" aria-hidden="true"><path class="flame" d=""/></svg>
     <p class="meco-kicker">Main engine cutoff</p>
-    <h2 id="meco-title">50 minutes burned.</h2>
+    <h2 id="meco-title" tabindex="-1" autofocus>50 minutes burned.</h2>
     <p class="hint" id="meco-sub">Still got fuel? Light the second stage and keep going.</p>
     <div class="chips meco-chips" id="meco-chips">
       <button type="button" data-second="15">15m</button>
@@ -356,6 +360,7 @@
   </template>
 
   <script src="flame.js"></script>
+  <script src="fx.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowInsets
 import android.webkit.JavascriptInterface
@@ -275,6 +276,18 @@ class MainActivity : Activity() {
 
     inner class Bridge {
         private val api = LocalApi(this@MainActivity)
+
+        /** A haptic click from the UI: "tick" as the dial turns, "confirm" at liftoff, "heavy" for the countdown. */
+        @JavascriptInterface
+        fun haptic(kind: String) {
+            val constant = when (kind) {
+                "tick" -> HapticFeedbackConstants.CLOCK_TICK
+                "confirm" -> if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.LONG_PRESS
+                "reject" -> if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
+                else -> HapticFeedbackConstants.LONG_PRESS
+            }
+            runOnUiThread { web.performHapticFeedback(constant) }
+        }
 
         /** Called synchronously from app.js; returns {"status": int, "body": ...}. Runs on the WebView's bridge thread. */
         @JavascriptInterface

@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="docs/screenshot-ignite.png" width="270" alt="The Ignite button">
+  <img src="docs/screenshot-ignite.png" width="270" alt="The ignition dial, set to 50 minutes">
   &nbsp;&nbsp;
   <img src="docs/screenshot-burning.png" width="270" alt="A burn in progress: 28 minutes left, locked">
 </p>
 
 # ignition
 
-**A focus timer you can't cheat.** Pick how long, press **IGNITE**, and the apps, websites and programs
+**A focus timer you can't cheat.** Turn the dial to how long, tap the middle, and the apps, websites and programs
 that eat your day are blocked until the timer runs out, on your phone and your computers at once.
 
 Most screen-time tools fail the same way: the block is one tap from gone. A "skip for today", a PIN you set
@@ -39,7 +39,7 @@ The phone app works entirely on its own: no account, no server, nothing to sign 
 4. Back in ignition, go to **⚙ → Blocking**. Add the websites you lose time to, pick the apps, or switch on
    **Every game**.
 
-That's it. Press **IGNITE**.
+That's it. Tap the middle of the dial to ignite.
 
 To get updates automatically, add `https://github.com/ieatfood314/ignition` to
 [Obtainium](https://obtainium.imranr.dev/).
@@ -104,9 +104,10 @@ That computer gets only the blocker, and follows the burns and block list from t
 
 ## Using it
 
-**Press IGNITE.** Change the minutes first if 50 isn't right. There's a 3-second countdown (tap again to
-cancel), and then you're *burning*: everything on your block list is blocked, everywhere, until the timer
-hits zero.
+**Turn the dial, then tap the middle.** The ring works like a minute hand: drag it round (or tap the ring,
+scroll, or use the arrow keys) to set the length, and keep going past twelve to add hours. Pick a T-minus
+underneath if you want a delay. There's a 3-second countdown (tap again to scrub), then liftoff: everything
+on your block list is blocked, everywhere, until the ring burns down.
 
 - **A burn of an hour or less can't be ended early.** There's no stop button. It runs out when it runs out.
 - **Longer burns** get a hold-to-end button, because once in a while a two-hour block really does need to
@@ -160,3 +161,6 @@ building the app yourself.
 
 The liftoff sound is NASA's SLS test fire, from [NASA's sound library](https://www.nasa.gov/historical-sounds/).
 Courtesy NASA.
+
+The type is [Space Grotesk](https://github.com/floriankarsten/space-grotesk) and
+[Space Mono](https://github.com/googlefonts/spacemono), both under the SIL Open Font License (`web/fonts/OFL.txt`).
