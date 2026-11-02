@@ -168,21 +168,59 @@
       </div>
       <div class="set-layout">
         <nav class="set-home" aria-label="Settings">
-          <a class="set-link" href="#settings/goals" data-go="goals"><span>Burn goals</span><span class="set-sum" id="sum-goals"></span></a>
-          <a class="set-link" href="#settings/launches" data-go="launches"><span>Scheduled launches</span><span class="set-sum" id="sum-launches"></span></a>
-          <a class="set-link" href="#settings/window" data-go="window"><span>Launch window</span><span class="set-sum" id="sum-window"></span></a>
-          <a class="set-link" href="#settings/blocking" data-go="blocking"><span>Blocking</span><span class="set-sum" id="sum-blocking"></span></a>
-          <a class="set-link app-only" href="#settings/phone" data-go="phone"><span>Phone</span><span class="set-sum" id="sum-phone"></span></a>
-          <a class="set-link app-only" href="#settings/sync" data-go="sync"><span>Sync</span><span class="set-sum" id="sum-sync"></span></a>
+          <a class="sys" href="#settings/goals" data-go="goals" style="--n:0">
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/></svg><i class="lamp" id="lamp-goals"></i></span>
+            <span class="sys-name">Burn goals</span>
+            <span class="sys-viz" id="viz-goals"></span>
+            <span class="set-sum" id="sum-goals"></span>
+          </a>
+          <a class="sys" href="#settings/launches" data-go="launches" style="--n:1">
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c3 2.5 4.5 6 4.5 10l-2 3h-5l-2-3C7.5 9 9 5.5 12 3z"/><circle cx="12" cy="10" r="1.6"/><path d="M9.5 16l-2.5 3M14.5 16l2.5 3M12 17v4"/></svg><i class="lamp" id="lamp-launches"></i></span>
+            <span class="sys-name">Scheduled launches</span>
+            <span class="sys-viz" id="viz-launches"></span>
+            <span class="set-sum" id="sum-launches"></span>
+          </a>
+          <a class="sys" href="#settings/window" data-go="window" style="--n:2">
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6 8 6v9H4z"/><path d="M12 12v3l2 1.5"/></svg><i class="lamp" id="lamp-window"></i></span>
+            <span class="sys-name">Launch window</span>
+            <span class="sys-viz" id="viz-window"></span>
+            <span class="set-sum" id="sum-window"></span>
+          </a>
+          <a class="sys" href="#settings/blocking" data-go="blocking" style="--n:3">
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><i class="lamp" id="lamp-blocking"></i></span>
+            <span class="sys-name">Blocking</span>
+            <span class="sys-viz" id="viz-blocking"></span>
+            <span class="set-sum" id="sum-blocking"></span>
+          </a>
+          <a class="sys app-only" href="#settings/phone" data-go="phone" style="--n:4">
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg><i class="lamp" id="lamp-phone"></i></span>
+            <span class="sys-name">Phone</span>
+            <span class="sys-viz" id="viz-phone"></span>
+            <span class="set-sum" id="sum-phone"></span>
+          </a>
+          <a class="sys app-only" href="#settings/sync" data-go="sync" style="--n:5">
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a7 7 0 0 1 12.5-3M19 15a7 7 0 0 1-12.5 3"/><path d="M17.5 2.5v3.5H14M6.5 21.5V18H10"/></svg><i class="lamp" id="lamp-sync"></i></span>
+            <span class="sys-name">Sync</span>
+            <span class="sys-viz" id="viz-sync"></span>
+            <span class="set-sum" id="sum-sync"></span>
+          </a>
         </nav>
         <div class="set-body">
           <section class="set-page" data-page="goals" data-title="Burn goals" hidden>
-            <p class="hint">Shown as progress bars on the Ignite page.</p>
-            <div class="set-row"><label for="goal-daily">Daily</label><input id="goal-daily" type="number" inputmode="numeric" min="0" placeholder="0"><span>min</span></div>
-            <div class="set-row"><label for="goal-weekly">Weekly</label><input id="goal-weekly" type="number" inputmode="numeric" min="0" placeholder="0"><span>hours</span></div>
+            <div class="goal-ctl" id="gc-daily" data-step="15" data-cells="32">
+              <div class="gc-head"><label for="goal-daily">Daily</label><span class="gc-read"><input id="goal-daily" type="number" inputmode="numeric" min="0" placeholder="0"><span>min</span></span></div>
+              <div class="gc-gauge" role="slider" tabindex="0" aria-label="Daily goal"></div>
+              <div class="gc-foot"><span class="gc-now"></span><span>8 h</span></div>
+            </div>
+            <div class="goal-ctl" id="gc-weekly" data-step="60" data-cells="40">
+              <div class="gc-head"><label for="goal-weekly">Weekly</label><span class="gc-read"><input id="goal-weekly" type="number" inputmode="decimal" min="0" placeholder="0"><span>hours</span></span></div>
+              <div class="gc-gauge" role="slider" tabindex="0" aria-label="Weekly goal"></div>
+              <div class="gc-foot"><span class="gc-now"></span><span>40 h</span></div>
+            </div>
           </section>
 
           <section class="set-page" data-page="launches" data-title="Scheduled launches" hidden>
+            <div class="plan" id="plan-launches"></div>
             <p class="hint">Ignites by itself at these times. You get a T-minus warning first and can scrub it.</p>
             <ul class="schedules" id="schedules"></ul>
             <button type="button" class="ghost small" id="add-schedule">+ Add a launch</button>
@@ -190,6 +228,7 @@
 
           <section class="set-page" data-page="window" data-title="Launch window" hidden>
             <p class="hint">A nudge, not a lock. If you haven't started anything a while after getting home, your phone asks if you want to start a T-minus.</p>
+            <div class="plan" id="plan-window"></div>
             <div class="toggle-row"><span>Nudge me</span><label class="switch" aria-label="Launch window on"><input type="checkbox" id="lw-on"><i></i></label></div>
             <div class="lw-body" id="lw-body">
               <div class="sched-days" id="lw-days"></div>
@@ -210,19 +249,19 @@
           </section>
 
           <section class="set-page" data-page="blocking" data-title="Blocking" hidden>
-            <h3>Websites</h3>
+            <h3>Websites<span class="h-count" id="cnt-sites"></span></h3>
             <p class="hint">Subdomains count too. Blocked in every browser on your phone, and on computers running the enforcer.</p>
             <ul class="tag-list" id="block-sites"></ul>
             <form class="tag-add" id="block-sites-add"><input placeholder="add a site, e.g. example.com" autocapitalize="off" spellcheck="false" inputmode="url"><button type="submit" class="ghost small">Add</button></form>
 
-            <h3>Phone apps</h3>
+            <h3>Phone apps<span class="h-count" id="cnt-apps"></span></h3>
             <div class="toggle-row"><span>Every game<span class="hint inline">anything Android files as a game, even hidden ones</span></span><label class="switch" aria-label="Block every game"><input type="checkbox" id="block-games"><i></i></label></div>
             <ul class="tag-list" id="block-apps"></ul>
             <button type="button" class="ghost small app-only" id="block-apps-pick">+ Choose apps</button>
             <form class="tag-add web-only" id="block-apps-add"><input placeholder="package name, e.g. com.reddit.frontpage" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost small">Add</button></form>
             <p class="hint" id="blocker-hint" hidden></p>
 
-            <h3>Programs on computers</h3>
+            <h3>Programs on computers<span class="h-count" id="cnt-programs"></span></h3>
             <p class="hint">Killed, along with anything they started, if they're launched during a burn.</p>
             <ul class="tag-list" id="block-programs"></ul>
             <form class="tag-add" id="block-programs-add"><input placeholder="add a program, e.g. steam" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost small">Add</button></form>
@@ -235,7 +274,7 @@
 
           <section class="set-page" data-page="phone" data-title="Phone" hidden>
             <div class="toggle-row"><span>Notifications</span><button type="button" class="ghost small" id="notif-btn">Allow</button></div>
-            <div class="toggle-row"><span>App &amp; site blocker<span class="hint inline" id="blocker-state"></span></span><button type="button" class="ghost small" id="blocker-btn">Turn on</button></div>
+            <div class="toggle-row"><span><i class="lamp" id="lamp-blocker"></i>App &amp; site blocker<span class="hint inline" id="blocker-state"></span></span><button type="button" class="ghost small" id="blocker-btn">Turn on</button></div>
             <div class="toggle-row"><span>Ring when a T-minus lifts off<span class="hint inline">wakes the screen with a short sound</span></span><label class="switch" aria-label="Ring at liftoff"><input type="checkbox" id="ring-toggle"><i></i></label></div>
             <div class="toggle-row" id="ring-sound-row" hidden>
               <div class="seg" id="ring-sound">
@@ -257,6 +296,11 @@
           </section>
 
           <section class="set-page" data-page="sync" data-title="Sync" hidden>
+            <div class="link-viz off" id="link-viz" aria-hidden="true">
+              <span class="node"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg><b>This phone</b></span>
+              <i class="wire"><s></s><s></s><s></s></i>
+              <span class="node"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M8 7h.01M8 17h.01"/></svg><b id="link-host">Server</b></span>
+            </div>
             <p class="hint">Optional. Point this at an ignition server to share lists, burns and settings with your other devices.</p>
             <div class="set-row wide"><input id="server-url" type="url" inputmode="url" placeholder="http://my-server:8445" autocapitalize="off" spellcheck="false"></div>
             <div class="set-row wide"><button type="button" class="ghost small" id="server-test">Test &amp; save</button><span class="hint" id="sync-status"></span></div>

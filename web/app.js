@@ -485,6 +485,7 @@ function setIgnite(s, quiet) {
   }
   state.stopping = false;
   renderIgnite();
+  if (state.page === "settings") paintSummaries(); // the goal gauges and the board follow the burns
 }
 
 async function loadIgnite() {
@@ -1061,13 +1062,24 @@ function tagEl(label, title, onRemove) {
   return li;
 }
 
+let seenTags = null;
 function renderBlock() {
   const b = editBlock;
+  const keys = new Set([...b.sites.map((x) => `s:${x}`), ...b.programs.map((x) => `p:${x}`), ...b.apps.map((x) => `a:${x.id}`)]);
+  const fresh = seenTags ? [...keys].filter((k) => !seenTags.has(k)) : [];
+  seenTags = keys;
   $("#block-sites").replaceChildren(...b.sites.map((s) => tagEl(s, null, () => { b.sites = b.sites.filter((x) => x !== s); blockEdited(); })));
   $("#block-programs").replaceChildren(...b.programs.map((p) => tagEl(p, null, () => { b.programs = b.programs.filter((x) => x !== p); blockEdited(); })));
   const apps = [...b.apps].sort((x, y) => x.label.localeCompare(y.label));
   $("#block-apps").replaceChildren(...apps.map((a) => tagEl(a.label, a.id, () => { b.apps = b.apps.filter((x) => x.id !== a.id); blockEdited(); })));
   $("#block-games").checked = b.games;
+  const flash = (sel, pre, list) => $$(`${sel} li`).forEach((li, i) => { if (fresh.includes(pre + list[i])) li.classList.add("new"); });
+  flash("#block-sites", "s:", b.sites);
+  flash("#block-programs", "p:", b.programs);
+  flash("#block-apps", "a:", apps.map((x) => x.id));
+  $("#cnt-sites").textContent = b.sites.length || "";
+  $("#cnt-programs").textContent = b.programs.length || "";
+  $("#cnt-apps").textContent = [b.apps.length || "", b.games ? "games" : ""].filter(Boolean).join(" + ");
   paintSummaries();
 }
 const blockEdited = () => { renderBlock(); scheduleSave(); };
@@ -1132,32 +1144,40 @@ $("#block-apps-pick").onclick = () => { location.hash = "settings/apps"; };
 
 /* ---- pages */
 
-// Phones drill down from the list; wider screens keep the list beside the open page.
-const wide = matchMedia("(min-width: 721px)");
+// Settings drills down: the board of systems, then one system. Going in slides in from the right, coming
+// back slides the board in from the left.
+const SET_DEPTH = { home: 0, apps: 2 };
 
 function goSettings(page) {
   if (!$(`.set-page[data-page="${page}"]`, settingsEl) || (page === "apps" && !NATIVE)) page = "home";
-  if (page === "home" && wide.matches) page = "goals";
+  const was = settingsPage;
   settingsPage = page;
   settingsEl.classList.toggle("at-home", page === "home");
   $$(".set-page", settingsEl).forEach((p) => { p.hidden = p.dataset.page !== page; });
-  const lit = page === "apps" ? "blocking" : page;
-  $$(".set-link", settingsEl).forEach((a) => a.dataset.go === lit ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
-  const sub = page !== "home" && (!wide.matches || page === "apps");
-  $("#settings-title").textContent = sub ? $(`.set-page[data-page="${page}"]`, settingsEl).dataset.title : "Settings";
+  const sub = page !== "home";
+  const title = sub ? $(`.set-page[data-page="${page}"]`, settingsEl).dataset.title : "Settings";
+  const h = $("#settings-title");
+  if (h.textContent !== title) { h.textContent = title; FX.decode(h, title, 300); }
   $("#settings-back").hidden = !sub;
   $("#settings-back").href = page === "apps" ? "#settings/blocking" : "#settings";
+  if (was !== page) {
+    const deeper = (SET_DEPTH[page] ?? 1) > (SET_DEPTH[was] ?? 1);
+    const el = sub ? $(`.set-page[data-page="${page}"]`, settingsEl) : $(".set-home", settingsEl);
+    el.classList.remove("push", "pop");
+    FX.replay(el, deeper ? "push" : "pop");
+    clearTimeout(el.slideTimer);
+    el.slideTimer = setTimeout(() => el.classList.remove("push", "pop"), 900);
+  }
   window.scrollTo(0, 0);
-  if (page === "home") paintSummaries();
+  paintSummaries();
   if (page === "apps") openAppPicker();
 }
 
 const settingsSub = () => location.hash.split("/")[1] || "home";
-wide.addEventListener("change", () => { if (state.page === "settings") goSettings(settingsSub()); });
 
 function settingsBack() {
   if (settingsPage === "apps") location.hash = "settings/blocking";
-  else if (settingsPage !== "home" && !wide.matches) location.hash = "settings";
+  else if (settingsPage !== "home") location.hash = "settings";
   else location.hash = state.lastTab;
 }
 
@@ -1173,28 +1193,178 @@ function readSettingsForm() {
   };
 }
 
+const lamp = (k, st) => { const el = $(`#lamp-${k}`); if (el) el.className = `lamp ${st}`; };
+
+/** The next time a scheduled launch fires, from the launches as they stand in the form. */
+function nextLaunch(schedules) {
+  const now = new Date();
+  for (let d = 0; d < 8; d++) {
+    const day = addDays(startOfToday(), d);
+    const wd = day.getDay() || 7;
+    const hits = schedules.filter((x) => x.enabled && x.days.includes(wd)).map((x) => {
+      const [h, m] = x.time.split(":").map(Number);
+      return { at: new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m), x };
+    }).filter((h) => h.at > now).sort((p, q) => p.at - q.at);
+    if (hits.length) return { ...hits[0], d };
+  }
+  return null;
+}
+
+/** The board: a light and a live readout for each system, and a one-line summary under it. */
 function paintSummaries() {
   if (!settingsDoc) return;
   const f = readSettingsForm();
-  const g = [f.goals.daily && `${f.goals.daily} min a day`, f.goals.weekly && `${+(f.goals.weekly / 60).toFixed(1)} h a week`].filter(Boolean);
-  $("#sum-goals").textContent = g.join(" · ") || "None";
-  const on = f.schedules.filter((s) => s.enabled).length;
+  const st = state.ignite.stats;
+
+  const g = [f.goals.daily && `${fmtEstimate(f.goals.daily)} a day`, f.goals.weekly && `${+(f.goals.weekly / 60).toFixed(1)} h a week`].filter(Boolean);
+  $("#sum-goals").textContent = g.join(" · ") || "None set";
+  lamp("goals", g.length ? (st && f.goals.daily && st.today / 60 >= f.goals.daily ? "on" : "idle") : "off");
+  $("#viz-goals").innerHTML = g.length && st
+    ? [["D", st.today, f.goals.daily], ["W", st.week, f.goals.weekly]].filter(([, , goal]) => goal)
+      .map(([l, sec, goal]) => `<span class="viz-gauge${sec / 60 >= goal ? " met" : ""}"><em>${l}</em>${gauge(sec / 60 / goal)}</span>`).join("")
+    : `<span class="viz-big dim">—</span>`;
+
+  const on = f.schedules.filter((x) => x.enabled).length;
   $("#sum-launches").textContent = f.schedules.length ? `${plural(f.schedules.length, "launch")}${on < f.schedules.length ? `, ${on} on` : ""}` : "None";
+  lamp("launches", on ? "on" : "off");
+  const nl = nextLaunch(f.schedules);
+  $("#viz-launches").innerHTML = nl
+    ? `<span class="viz-big">${esc(fmtTime(nl.at / 1000))}</span><span class="viz-sub">${nl.d === 0 ? "today" : nl.d === 1 ? "tomorrow" : esc(nl.at.toLocaleDateString(undefined, { weekday: "long" }))} · ${fmtEstimate(nl.x.minutes)}</span>`
+    : `<span class="viz-big dim">—</span>`;
+
   const lw = f.launch_window;
-  $("#sum-window").textContent = lw.enabled
-    ? `${fmtDays(lw.days)} ${fmtHm(lw.start)}–${fmtHm(lw.end)}, ${lw.after} min after ${lw.trigger === "home" ? "you get home" : "it opens"}`
-    : "Off";
+  $("#sum-window").textContent = lw.enabled ? `${lw.after} min after ${lw.trigger === "home" ? "you get home" : "it opens"}` : "Off";
+  lamp("window", lw.enabled ? (openWindow() ? "on blink" : "idle") : "off");
+  $("#viz-window").innerHTML = `<span class="viz-days${lw.enabled ? "" : " dim"}">${DAY_LETTERS.map((l, i) => `<i class="${lw.days.includes(i + 1) ? "on" : ""}">${l}</i>`).join("")}</span>`
+    + `<span class="viz-sub${lw.enabled ? "" : " dim"}">${esc(fmtHm(lw.start))}–${esc(fmtHm(lw.end))}</span>`;
+
   const b = f.block;
+  const targets = b.sites.length + b.apps.length + b.programs.length;
   $("#sum-blocking").textContent = [
     b.sites.length && plural(b.sites.length, "site"),
     (b.apps.length || b.games) && (b.games ? `${b.apps.length ? plural(b.apps.length, "app") + " + " : ""}games` : plural(b.apps.length, "app")),
     b.programs.length && plural(b.programs.length, "program"),
   ].filter(Boolean).join(" · ") || "Nothing";
+  lamp("blocking", targets || b.games ? "on" : "off");
+  $("#viz-blocking").innerHTML = `<span class="viz-big${targets || b.games ? "" : " dim"}">${targets}</span>${b.games ? `<span class="viz-sub">+ every game</span>` : `<span class="viz-sub">${targets === 1 ? "target" : "targets"}</span>`}`;
+
   if (appInfo) {
-    $("#sum-phone").textContent = appInfo.blocker.enabled ? "Blocker on" : "Blocker off";
-    $("#sum-phone").classList.toggle("warn", !appInfo.blocker.enabled);
+    const bl = appInfo.blocker.enabled;
+    $("#sum-phone").textContent = bl ? "Blocker on" : "Blocker off";
+    $("#sum-phone").classList.toggle("warn", !bl);
+    lamp("phone", bl ? "on" : "warn");
+    lamp("blocker", bl ? "on" : "warn");
+    $("#viz-phone").innerHTML = [["Block", bl], ["Alerts", appInfo.notifications.granted], ["DND", appInfo.dnd.enabled], ["Ring", appInfo.ring.enabled]]
+      .map(([l, v]) => `<span class="viz-sw${v ? " on" : ""}${l === "Block" && !v ? " warn" : ""}"><i></i>${l}</span>`).join("");
+    const link = syncState();
     $("#sum-sync").textContent = appInfo.server_url ? appInfo.server_url.replace(/^https?:\/\//, "") : "Off";
+    lamp("sync", link === "up" ? "on" : link === "down" ? "warn" : "off");
+    $("#viz-sync").innerHTML = `<span class="viz-wire ${link}"><i></i><s></s><s></s><s></s><i></i></span>`;
   }
+  goalPainters.forEach((p) => p());
+  renderPlans();
+}
+
+/* ---- the flight plan: a week of launches (and the launch window) at a glance */
+
+function renderPlans() {
+  if (state.page !== "settings" || !settingsDoc) return;
+  if (settingsPage === "launches") renderPlan($("#plan-launches"), "launches");
+  if (settingsPage === "window") renderPlan($("#plan-window"), "window");
+}
+
+function renderPlan(el, focus) {
+  const W = el.clientWidth;
+  if (!W) return;
+  const f = readSettingsForm();
+  const left = 18, rowH = 16, gap = 5, H = 7 * (rowH + gap) + 16;
+  const x = (min) => left + ((W - left) * Math.max(0, Math.min(1440, min))) / 1440;
+  const y = (d) => (d - 1) * (rowH + gap);
+  const hm = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+  let out = `<defs><pattern id="hatch-${focus}" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="5"/></pattern></defs>`;
+  for (let d = 1; d <= 7; d++) {
+    out += `<text x="0" y="${y(d) + rowH / 2 + 3.5}">${DAY_LETTERS[d - 1]}</text><rect class="lane" x="${left}" y="${y(d)}" width="${W - left}" height="${rowH}" rx="2"/>`;
+  }
+  for (const h of [6, 12, 18]) out += `<line class="hr" x1="${x(h * 60)}" x2="${x(h * 60)}" y1="0" y2="${7 * (rowH + gap) - gap}"/>`;
+  for (const h of [0, 6, 12, 18]) out += `<text x="${x(h * 60) + (h ? 0 : 0)}" y="${H - 3}" text-anchor="${h ? "middle" : "start"}">${esc(fmtHour(h))}</text>`;
+
+  const lw = f.launch_window;
+  if (lw.enabled) {
+    for (const d of lw.days) {
+      const a = hm(lw.start), b = hm(lw.end);
+      out += `<rect class="win" fill="url(#hatch-${focus})" x="${x(a)}" y="${y(d)}" width="${Math.max(2, x(b) - x(a))}" height="${rowH}"/>`;
+      if (lw.trigger === "time" && focus === "window") out += `<rect class="nudge" x="${x(a + lw.after) - 1}" y="${y(d) - 2}" width="2" height="${rowH + 4}"/>`;
+    }
+  }
+  let k = 0;
+  for (const sc of f.schedules) {
+    const a = hm(sc.time), cls = sc.enabled ? "blk" : "blk off";
+    for (const d of sc.days) {
+      const pieces = [[d, a, a + sc.minutes]];
+      if (a + sc.minutes > 1440) pieces[0][2] = 1440, pieces.push([(d % 7) + 1, 0, a + sc.minutes - 1440]);
+      if (sc.lead && sc.enabled) out += `<rect class="lead" x="${x(a - sc.lead)}" y="${y(d) + rowH / 2 - 1}" width="${Math.max(1, x(a) - x(a - sc.lead))}" height="2"/>`;
+      for (const [dd, p, q] of pieces) {
+        out += `<rect class="${cls}" style="--k:${k++}" x="${x(p)}" y="${y(dd)}" width="${Math.max(3, x(q) - x(p))}" height="${rowH}" rx="2"/>`;
+      }
+    }
+  }
+  const now = new Date(), nd = now.getDay() || 7, nm = now.getHours() * 60 + now.getMinutes();
+  out += `<line class="now" x1="${x(nm)}" x2="${x(nm)}" y1="${y(nd) - 3}" y2="${y(nd) + rowH + 3}"/><circle class="now" cx="${x(nm)}" cy="${y(nd) - 3}" r="2.5"/>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="This week's launches">${out}</svg>`;
+}
+window.addEventListener("resize", () => renderPlans());
+
+/* ---- burn goals: fuel gauges you drag, with the number above them still there to type into */
+
+function goalGauge(ctl) {
+  const step = Number(ctl.dataset.step), cells = Number(ctl.dataset.cells);
+  const weekly = ctl.id === "gc-weekly";
+  const input = $("input", ctl), g = $(".gc-gauge", ctl);
+  g.innerHTML = Array.from({ length: cells }, (_, i) => `<i style="--i:${i}"></i>`).join("") + `<b class="gc-mark"></b>`;
+  const cellEls = $$("i", g);
+  const minutes = () => (weekly ? Math.round((parseFloat(input.value) || 0) * 60) : parseInt(input.value, 10) || 0);
+  const paint = () => {
+    const m = minutes(), n = Math.min(cells, Math.round(m / step));
+    cellEls.forEach((c, i) => c.classList.toggle("on", i < n));
+    ctl.classList.toggle("off", !m);
+    g.setAttribute("aria-valuenow", m);
+    g.setAttribute("aria-valuetext", m ? fmtEstimate(m) : "Off");
+    const st = state.ignite.stats;
+    const done = st ? (weekly ? st.week : st.today) : 0;
+    $(".gc-mark", g).style.left = `${Math.min(100, (done / 60 / (step * cells)) * 100)}%`;
+    $(".gc-mark", g).hidden = !st;
+    $(".gc-now", ctl).textContent = st ? `${weekly ? "This week" : "Today"} ${fmtDuration(done)}` : "";
+  };
+  const set = (m) => {
+    if (m === minutes()) return;
+    input.value = m ? (weekly ? m / 60 : m) : "";
+    FX.haptic("tick");
+    paint();
+    edited();
+  };
+  const at = (e) => {
+    const r = g.getBoundingClientRect(), fr = (e.clientX - r.left) / r.width;
+    return fr < 0.5 / cells ? 0 : Math.min(cells, Math.ceil(fr * cells)) * step;
+  };
+  let drag = false;
+  g.addEventListener("pointerdown", (e) => { e.preventDefault(); g.setPointerCapture(e.pointerId); drag = true; g.classList.add("dragging"); set(at(e)); });
+  g.addEventListener("pointermove", (e) => { if (drag) set(at(e)); });
+  ["pointerup", "pointercancel"].forEach((ev) => g.addEventListener(ev, () => { drag = false; g.classList.remove("dragging"); }));
+  g.addEventListener("keydown", (e) => {
+    const d = { ArrowRight: step, ArrowUp: step, ArrowLeft: -step, ArrowDown: -step }[e.key];
+    if (d) { e.preventDefault(); set(Math.max(0, Math.min(cells * step, Math.round(minutes() / step) * step + d))); }
+  });
+  input.addEventListener("input", paint);
+  return paint;
+}
+const goalPainters = $$(".goal-ctl").map(goalGauge);
+
+/** up: synced and the last try worked; down: the last try failed; off: not syncing. */
+function syncState() {
+  if (!appInfo || !appInfo.server_url) return "off";
+  const s = appInfo.sync;
+  if (s && s.last_error && (!s.last_ok || s.last_error_at > s.last_ok)) return "down";
+  return s && s.last_ok ? "up" : "down";
 }
 settingsEl.addEventListener("input", (e) => { if (!e.target.closest("#app-search, #server-url")) edited(); });
 
@@ -1205,6 +1375,7 @@ function fillSettings(s) {
   $("#goal-weekly").value = s.goals.weekly ? +(s.goals.weekly / 60).toFixed(1) : "";
   $("#schedules").replaceChildren(...s.schedules.map(scheduleEl));
   editBlock = JSON.parse(JSON.stringify(s.block));
+  goalPainters.forEach((p) => p());
   fillWindow(s.launch_window);
   $("#lw-body").classList.toggle("off", !s.launch_window.enabled);
   renderBlock();
@@ -1250,6 +1421,9 @@ function paintSyncStatus() {
     if (s && s.last_error && (!s.last_ok || s.last_error_at > s.last_ok)) text += ` · last try failed: ${s.last_error}`;
   }
   $("#sync-status").textContent = text;
+  const viz = $("#link-viz");
+  viz.className = `link-viz ${syncState()}`;
+  $("#link-host").textContent = appInfo && appInfo.server_url ? appInfo.server_url.replace(/^https?:\/\//, "").split(/[:/]/)[0] : "Server";
 }
 
 /* ---- saving: every edit saves itself a moment later, and anything pending goes when you leave */
