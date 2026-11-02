@@ -615,34 +615,6 @@ input[type="time"] { color-scheme: dark; font-family: var(--mono); font-size: 14
 .lamp.warn { background: var(--accent); box-shadow: 0 0 10px var(--glow); animation: blink 1s steps(2) infinite; }
 .lamp.blink { animation: blink 1.6s steps(2) infinite; }
 
-.viz-big { font-size: 30px; font-weight: 300; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
-.viz-sub { font: 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-.viz-big.dim, .viz-sub.dim { color: var(--faint); }
-.viz-gauge { display: flex; align-items: center; gap: 7px; }
-.viz-gauge em { font: normal 9.5px var(--mono); color: var(--faint); width: 9px; }
-.viz-gauge .gauge { flex: 1; height: 7px; gap: 1.5px; }
-.viz-gauge.met .gauge i.on { background: var(--accent); }
-.viz-days { display: flex; gap: 3px; }
-.viz-days i { flex: 1; max-width: 19px; height: 19px; display: grid; place-items: center; border-radius: 4px; font: normal 9.5px var(--mono); color: var(--faint); border: 1px solid var(--line); }
-.viz-days i.on { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
-.viz-days.dim i.on { border-color: var(--line-2); background: none; color: var(--muted); }
-.viz-sw { display: inline-flex; align-items: center; gap: 6px; font: 9.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
-.viz-sw i { width: 6px; height: 6px; border-radius: 50%; background: #262626; }
-.viz-sw.on { color: var(--muted); }
-.viz-sw.on i { background: var(--accent); box-shadow: 0 0 6px var(--glow); }
-.viz-sw.warn { color: var(--accent); }
-.viz-sw.warn i { background: var(--accent); animation: blink 1s steps(2) infinite; }
-#viz-phone { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
-.viz-wire { position: relative; display: flex; align-items: center; height: 14px; }
-.viz-wire::before { content: ""; position: absolute; left: 6px; right: 6px; height: 1.5px; background: var(--line-2); }
-.viz-wire i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--muted); background: #000; position: relative; z-index: 1; }
-.viz-wire i:last-child { margin-left: auto; }
-.viz-wire s { position: absolute; left: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: 0; }
-.viz-wire.up::before { background: rgba(226, 58, 41, .35); }
-.viz-wire.up s { animation: travel 1.8s linear infinite; box-shadow: 0 0 6px var(--glow); }
-.viz-wire.up s:nth-of-type(2) { animation-delay: .6s; } .viz-wire.up s:nth-of-type(3) { animation-delay: 1.2s; }
-.viz-wire.down::before { background: repeating-linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 10px); }
-.viz-wire.off { opacity: .4; }
 @keyframes travel { 0% { left: 6px; opacity: 0; } 10%, 90% { opacity: 1; } 100% { left: calc(100% - 10px); opacity: 0; } }
 
 /* Burn goals: fuel gauges. Drag along one; the number above is the same value, there to type into. */
@@ -704,6 +676,40 @@ input[type="time"] { color-scheme: dark; font-family: var(--mono); font-size: 14
 .set-page h3 { display: flex; align-items: center; gap: 12px; font-size: 10.5px; color: var(--faint); font-weight: 400; margin: 28px 0 10px; }
 .set-page h3::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--line-2), transparent); }
 .set-page h3:first-child { margin-top: 4px; }
+/* Tile badges: a word and a light, so the light never has to be decoded. */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 7px; border-radius: 6px;
+  font: 400 9.5px/1.2 var(--mono); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap;
+  border: 1px solid var(--line-2); color: var(--faint);
+}
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #2a2a2a; }
+.pill.set { color: var(--muted); }
+.pill.set::before { background: #8a8a8a; }
+.pill.on { color: var(--text); border-color: rgba(226, 58, 41, .5); }
+.pill.on::before { background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+.pill.warn { color: #fff; background: var(--accent); border-color: var(--accent); }
+.pill.warn::before { background: #fff; animation: blink 1s steps(2) infinite; }
+.sys-top { gap: 10px; }
+.sys-big { font-size: 19px; font-weight: 500; letter-spacing: -.02em; line-height: 1.2; }
+.sys-big i { font-style: normal; font-weight: 400; color: var(--muted); }
+.sys-viz { justify-content: flex-start; gap: 8px; min-height: 0; }
+.sys-viz .gauge { height: 6px; gap: 1.5px; }
+.sys .set-sum { white-space: normal; font: 11.5px/1.4 var(--sans); color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sys .set-sum .warn, .sync-facts .warn { color: var(--accent); font-weight: 500; }
+
+/* Sync, in words: the verdict, then the facts. */
+.sync-head { margin: 4px 0 14px; display: flex; align-items: center; gap: 12px; font-size: 22px; letter-spacing: -.02em; }
+.sync-head::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: #333; flex: none; }
+.sync-head.up::before { background: var(--accent); box-shadow: 0 0 10px var(--glow); }
+.sync-head.down::before { background: var(--accent); animation: blink 1s steps(2) infinite; }
+.sync-head b { font-weight: 500; }
+.sync-facts { display: grid; grid-template-columns: 96px 1fr; gap: 12px 14px; margin: 0 0 8px; font-size: 14px; }
+.sync-facts dt { font: 10px/1.9 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+.sync-facts dd { margin: 0; color: var(--text); line-height: 1.45; }
+.sync-facts .comp { display: flex; align-items: center; gap: 8px; }
+.sync-facts .comp i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+.sync-facts .comp em { font-style: normal; color: var(--muted); font-size: 12.5px; }
+.sync-facts .comp.stale i { background: #444; box-shadow: none; }
 .h-count { margin-left: 2px; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--line-2); color: var(--muted); letter-spacing: .08em; }
 .h-count:empty { display: none; }
 .tag-list li.new { animation: tagNew 1.1s ease-out; }

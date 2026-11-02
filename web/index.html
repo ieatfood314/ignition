@@ -169,37 +169,37 @@
       <div class="set-layout">
         <nav class="set-home" aria-label="Settings">
           <a class="sys" href="#settings/goals" data-go="goals" style="--n:0">
-            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/></svg><i class="lamp" id="lamp-goals"></i></span>
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/></svg><b class="pill" id="pill-goals"></b></span>
             <span class="sys-name">Burn goals</span>
             <span class="sys-viz" id="viz-goals"></span>
             <span class="set-sum" id="sum-goals"></span>
           </a>
           <a class="sys" href="#settings/launches" data-go="launches" style="--n:1">
-            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c3 2.5 4.5 6 4.5 10l-2 3h-5l-2-3C7.5 9 9 5.5 12 3z"/><circle cx="12" cy="10" r="1.6"/><path d="M9.5 16l-2.5 3M14.5 16l2.5 3M12 17v4"/></svg><i class="lamp" id="lamp-launches"></i></span>
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c3 2.5 4.5 6 4.5 10l-2 3h-5l-2-3C7.5 9 9 5.5 12 3z"/><circle cx="12" cy="10" r="1.6"/><path d="M9.5 16l-2.5 3M14.5 16l2.5 3M12 17v4"/></svg><b class="pill" id="pill-launches"></b></span>
             <span class="sys-name">Scheduled launches</span>
             <span class="sys-viz" id="viz-launches"></span>
             <span class="set-sum" id="sum-launches"></span>
           </a>
           <a class="sys" href="#settings/window" data-go="window" style="--n:2">
-            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6 8 6v9H4z"/><path d="M12 12v3l2 1.5"/></svg><i class="lamp" id="lamp-window"></i></span>
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6 8 6v9H4z"/><path d="M12 12v3l2 1.5"/></svg><b class="pill" id="pill-window"></b></span>
             <span class="sys-name">Launch window</span>
             <span class="sys-viz" id="viz-window"></span>
             <span class="set-sum" id="sum-window"></span>
           </a>
           <a class="sys" href="#settings/blocking" data-go="blocking" style="--n:3">
-            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><i class="lamp" id="lamp-blocking"></i></span>
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><b class="pill" id="pill-blocking"></b></span>
             <span class="sys-name">Blocking</span>
             <span class="sys-viz" id="viz-blocking"></span>
             <span class="set-sum" id="sum-blocking"></span>
           </a>
           <a class="sys app-only" href="#settings/phone" data-go="phone" style="--n:4">
-            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg><i class="lamp" id="lamp-phone"></i></span>
-            <span class="sys-name">Phone</span>
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg><b class="pill" id="pill-phone"></b></span>
+            <span class="sys-name">This phone</span>
             <span class="sys-viz" id="viz-phone"></span>
             <span class="set-sum" id="sum-phone"></span>
           </a>
           <a class="sys app-only" href="#settings/sync" data-go="sync" style="--n:5">
-            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a7 7 0 0 1 12.5-3M19 15a7 7 0 0 1-12.5 3"/><path d="M17.5 2.5v3.5H14M6.5 21.5V18H10"/></svg><i class="lamp" id="lamp-sync"></i></span>
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a7 7 0 0 1 12.5-3M19 15a7 7 0 0 1-12.5 3"/><path d="M17.5 2.5v3.5H14M6.5 21.5V18H10"/></svg><b class="pill" id="pill-sync"></b></span>
             <span class="sys-name">Sync</span>
             <span class="sys-viz" id="viz-sync"></span>
             <span class="set-sum" id="sum-sync"></span>
@@ -272,7 +272,7 @@
             <ul class="app-pick" id="app-pick"></ul>
           </section>
 
-          <section class="set-page" data-page="phone" data-title="Phone" hidden>
+          <section class="set-page" data-page="phone" data-title="This phone" hidden>
             <div class="toggle-row"><span>Notifications</span><button type="button" class="ghost small" id="notif-btn">Allow</button></div>
             <div class="toggle-row"><span><i class="lamp" id="lamp-blocker"></i>App &amp; site blocker<span class="hint inline" id="blocker-state"></span></span><button type="button" class="ghost small" id="blocker-btn">Turn on</button></div>
             <div class="toggle-row"><span>Ring when a T-minus lifts off<span class="hint inline">wakes the screen with a short sound</span></span><label class="switch" aria-label="Ring at liftoff"><input type="checkbox" id="ring-toggle"><i></i></label></div>
@@ -296,12 +296,15 @@
           </section>
 
           <section class="set-page" data-page="sync" data-title="Sync" hidden>
+            <p class="sync-head" id="sync-head"></p>
             <div class="link-viz off" id="link-viz" aria-hidden="true">
               <span class="node"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg><b>This phone</b></span>
               <i class="wire"><s></s><s></s><s></s></i>
               <span class="node"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M8 7h.01M8 17h.01"/></svg><b id="link-host">Server</b></span>
             </div>
-            <p class="hint">Optional. Point this at an ignition server to share lists, burns and settings with your other devices.</p>
+            <dl class="sync-facts" id="sync-facts"></dl>
+            <h3>Server</h3>
+            <p class="hint">Optional. Shares lists, burns and settings with an ignition server and the computers using it.</p>
             <div class="set-row wide"><input id="server-url" type="url" inputmode="url" placeholder="http://my-server:8445" autocapitalize="off" spellcheck="false"></div>
             <div class="set-row wide"><button type="button" class="ghost small" id="server-test">Test &amp; save</button><span class="hint" id="sync-status"></span></div>
           </section>

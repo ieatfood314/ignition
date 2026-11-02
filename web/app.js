@@ -1210,56 +1210,95 @@ function nextLaunch(schedules) {
   return null;
 }
 
-/** The board: a light and a live readout for each system, and a one-line summary under it. */
+/** "40 s ago", "5 min ago", "3 h ago", or a time and day for anything older. */
+function fmtAgo(ts) {
+  const d = Math.max(0, Math.round(Date.now() / 1000 - ts));
+  if (d < 10) return "just now";
+  if (d < 60) return `${d} s ago`;
+  if (d < 3600) return `${Math.floor(d / 60)} min ago`;
+  if (d < 6 * 3600) return `${Math.floor(d / 3600)} h ago`;
+  return fmtWhen(ts);
+}
+
+/** A tile's badge: a word, and a light that says the same thing. */
+const pill = (k, word, st) => { const el = $(`#pill-${k}`); if (el) { el.className = `pill ${st}`; el.textContent = word; } };
+const tile = (k, big, small, extra = "") => {
+  $(`#viz-${k}`).innerHTML = `<span class="sys-big">${big}</span>${extra}`;
+  $(`#sum-${k}`).innerHTML = small;
+};
+
+/** The board: each tile says, in words, what that part is doing right now. */
 function paintSummaries() {
   if (!settingsDoc) return;
   const f = readSettingsForm();
   const st = state.ignite.stats;
+  const hrs = (sec) => `${+(sec / 3600).toFixed(1)}`;
 
-  const g = [f.goals.daily && `${fmtEstimate(f.goals.daily)} a day`, f.goals.weekly && `${+(f.goals.weekly / 60).toFixed(1)} h a week`].filter(Boolean);
-  $("#sum-goals").textContent = g.join(" · ") || "None set";
-  lamp("goals", g.length ? (st && f.goals.daily && st.today / 60 >= f.goals.daily ? "on" : "idle") : "off");
-  $("#viz-goals").innerHTML = g.length && st
-    ? [["D", st.today, f.goals.daily], ["W", st.week, f.goals.weekly]].filter(([, , goal]) => goal)
-      .map(([l, sec, goal]) => `<span class="viz-gauge${sec / 60 >= goal ? " met" : ""}"><em>${l}</em>${gauge(sec / 60 / goal)}</span>`).join("")
-    : `<span class="viz-big dim">—</span>`;
+  const { daily, weekly } = f.goals;
+  if (daily || weekly) {
+    const met = st && daily && st.today / 60 >= daily;
+    pill("goals", met ? "Met today" : "On", met ? "on" : "set");
+    const today = st && daily ? `${fmtDuration(st.today)} <i>of ${fmtEstimate(daily)} today</i>` : `${fmtEstimate(daily || 0)} <i>a day</i>`;
+    const week = weekly ? `This week ${st ? `${hrs(st.week)} of ` : ""}${+(weekly / 60).toFixed(1)} h` : "No weekly goal";
+    tile("goals", daily ? today : `${st ? hrs(st.week) : 0} h <i>of ${+(weekly / 60).toFixed(1)} h this week</i>`,
+      daily ? esc(week) : "No daily goal", st && daily ? gauge(st.today / 60 / daily) : "");
+  } else {
+    pill("goals", "Off", "off");
+    tile("goals", "None set", "How much you want to burn a day or week");
+  }
 
   const on = f.schedules.filter((x) => x.enabled).length;
-  $("#sum-launches").textContent = f.schedules.length ? `${plural(f.schedules.length, "launch")}${on < f.schedules.length ? `, ${on} on` : ""}` : "None";
-  lamp("launches", on ? "on" : "off");
   const nl = nextLaunch(f.schedules);
-  $("#viz-launches").innerHTML = nl
-    ? `<span class="viz-big">${esc(fmtTime(nl.at / 1000))}</span><span class="viz-sub">${nl.d === 0 ? "today" : nl.d === 1 ? "tomorrow" : esc(nl.at.toLocaleDateString(undefined, { weekday: "long" }))} · ${fmtEstimate(nl.x.minutes)}</span>`
-    : `<span class="viz-big dim">—</span>`;
+  pill("launches", on ? "On" : "Off", on ? "set" : "off");
+  if (nl) {
+    const day = nl.d === 0 ? "today" : nl.d === 1 ? "tomorrow" : nl.at.toLocaleDateString(undefined, { weekday: "long" });
+    tile("launches", `${esc(fmtTime(nl.at / 1000))} <i>${esc(day)}</i>`, `Next one · ${fmtEstimate(nl.x.minutes)} burn${f.schedules.length > 1 ? ` · ${f.schedules.length} set up` : ""}`);
+  } else {
+    tile("launches", "None", f.schedules.length ? `${plural(f.schedules.length, "launch")}, all switched off` : "Starts burns by itself at set times");
+  }
 
   const lw = f.launch_window;
-  $("#sum-window").textContent = lw.enabled ? `${lw.after} min after ${lw.trigger === "home" ? "you get home" : "it opens"}` : "Off";
-  lamp("window", lw.enabled ? (openWindow() ? "on blink" : "idle") : "off");
-  $("#viz-window").innerHTML = `<span class="viz-days${lw.enabled ? "" : " dim"}">${DAY_LETTERS.map((l, i) => `<i class="${lw.days.includes(i + 1) ? "on" : ""}">${l}</i>`).join("")}</span>`
-    + `<span class="viz-sub${lw.enabled ? "" : " dim"}">${esc(fmtHm(lw.start))}–${esc(fmtHm(lw.end))}</span>`;
+  if (lw.enabled) {
+    const open = openWindow();
+    pill("window", open ? "Open now" : "On", open ? "on" : "set");
+    const hmDate = (hm) => { const [h, m] = hm.split(":").map(Number); return new Date(2000, 0, 1, h, m); };
+    tile("window", `${esc(timeRange.formatRange(hmDate(lw.start), hmDate(lw.end)))} <i>${esc(fmtDays(lw.days).toLowerCase())}</i>`,
+      `Nudges you ${lw.after} min after ${lw.trigger === "home" ? "you get home" : "it opens"}`);
+  } else {
+    pill("window", "Off", "off");
+    tile("window", "Off", "Nudges you to start a burn when you get home");
+  }
 
   const b = f.block;
-  const targets = b.sites.length + b.apps.length + b.programs.length;
-  $("#sum-blocking").textContent = [
-    b.sites.length && plural(b.sites.length, "site"),
-    (b.apps.length || b.games) && (b.games ? `${b.apps.length ? plural(b.apps.length, "app") + " + " : ""}games` : plural(b.apps.length, "app")),
-    b.programs.length && plural(b.programs.length, "program"),
-  ].filter(Boolean).join(" · ") || "Nothing";
-  lamp("blocking", targets || b.games ? "on" : "off");
-  $("#viz-blocking").innerHTML = `<span class="viz-big${targets || b.games ? "" : " dim"}">${targets}</span>${b.games ? `<span class="viz-sub">+ every game</span>` : `<span class="viz-sub">${targets === 1 ? "target" : "targets"}</span>`}`;
+  const parts = [b.sites.length && plural(b.sites.length, "site"), b.apps.length && plural(b.apps.length, "app"),
+    b.programs.length && plural(b.programs.length, "program")].filter(Boolean);
+  const count = b.sites.length + b.apps.length + b.programs.length;
+  const phoneOff = appInfo && !appInfo.blocker.enabled;
+  if (count || b.games) {
+    pill("blocking", phoneOff ? "Fix" : "On", phoneOff ? "warn" : "set");
+    tile("blocking", count ? `${count} blocked${b.games ? " <i>+ every game</i>" : ""}` : "Every game",
+      phoneOff ? `<b class="warn">Not on this phone: blocker is off</b>` : esc(parts.join(" · ") || "Blocked during every burn"));
+  } else {
+    pill("blocking", "Off", "off");
+    tile("blocking", "Nothing yet", "Pick the sites, apps and programs to block");
+  }
 
   if (appInfo) {
     const bl = appInfo.blocker.enabled;
-    $("#sum-phone").textContent = bl ? "Blocker on" : "Blocker off";
-    $("#sum-phone").classList.toggle("warn", !bl);
-    lamp("phone", bl ? "on" : "warn");
     lamp("blocker", bl ? "on" : "warn");
-    $("#viz-phone").innerHTML = [["Block", bl], ["Alerts", appInfo.notifications.granted], ["DND", appInfo.dnd.enabled], ["Ring", appInfo.ring.enabled]]
-      .map(([l, v]) => `<span class="viz-sw${v ? " on" : ""}${l === "Block" && !v ? " warn" : ""}"><i></i>${l}</span>`).join("");
+    const missing = [!appInfo.notifications.granted && "notifications"].filter(Boolean);
+    pill("phone", bl && !missing.length ? "OK" : "Fix", bl && !missing.length ? "on" : "warn");
+    const extras = [appInfo.ring.enabled && "rings at liftoff", appInfo.dnd.enabled && "Do Not Disturb"].filter(Boolean);
+    tile("phone", bl ? (missing.length ? "Notifications off" : "All set") : "Blocker is off",
+      bl ? esc(extras.join(" · ") || "Blocker on") : `<b class="warn">Apps and sites won't be blocked here</b>`);
+
     const link = syncState();
-    $("#sum-sync").textContent = appInfo.server_url ? appInfo.server_url.replace(/^https?:\/\//, "") : "Off";
-    lamp("sync", link === "up" ? "on" : link === "down" ? "warn" : "off");
-    $("#viz-sync").innerHTML = `<span class="viz-wire ${link}"><i></i><s></s><s></s><s></s><i></i></span>`;
+    const s = appInfo.sync || {};
+    pill("sync", { up: "Working", down: "Failing", off: "Off" }[link], { up: "on", down: "warn", off: "off" }[link]);
+    const host = appInfo.server_url ? appInfo.server_url.replace(/^https?:\/\//, "").split(/[:/]/)[0] : "";
+    if (link === "up") tile("sync", `Synced <i>${esc(fmtAgo(s.last_ok))}</i>`, esc(`with ${host}`));
+    else if (link === "down") tile("sync", s.last_ok ? `Last worked <i>${esc(fmtAgo(s.last_ok))}</i>` : "Never synced", `<b class="warn">${esc(s.last_error || "Can't reach the server")}</b>`);
+    else tile("sync", "Off", "Everything stays on this phone");
   }
   goalPainters.forEach((p) => p());
   renderPlans();
@@ -1413,17 +1452,33 @@ async function loadAppInfo() {
   } catch (e) { $("#sync-status").textContent = e.message; }
 }
 
+/** The Sync page: a verdict in plain words, then the facts behind it. */
 function paintSyncStatus() {
-  const s = appInfo && appInfo.sync;
-  let text = "Not syncing. Everything stays on this phone.";
-  if (appInfo && appInfo.server_url) {
-    text = s && s.last_ok ? `Synced ${fmtWhen(s.last_ok)}` : "Not synced yet";
-    if (s && s.last_error && (!s.last_ok || s.last_error_at > s.last_ok)) text += ` · last try failed: ${s.last_error}`;
+  const link = syncState();
+  const s = (appInfo && appInfo.sync) || {};
+  const host = appInfo && appInfo.server_url ? appInfo.server_url.replace(/^https?:\/\//, "").split(/[:/]/)[0] : "";
+  $("#link-viz").className = `link-viz ${link}`;
+  $("#link-host").textContent = host || "Server";
+  const head = $("#sync-head");
+  head.className = `sync-head ${link}`;
+  head.innerHTML = {
+    up: `<b>Sync is working</b>`,
+    down: `<b>Sync isn't working</b>`,
+    off: `<b>Sync is off</b>`,
+  }[link];
+  const rows = [];
+  if (link === "off") {
+    rows.push(["Now", "Lists, burns and settings stay on this phone"]);
+  } else {
+    rows.push(["Last synced", s.last_ok ? `${fmtTime(s.last_ok)} · ${fmtAgo(s.last_ok)}` : "Never"]);
+    if (link === "down") rows.push(["Problem", `<b class="warn">${esc(s.last_error || "Can't reach the server")}</b>${s.last_error_at ? ` · ${esc(fmtAgo(s.last_error_at))}` : ""}`]);
+    rows.push(["How often", "Every 10 s while the app is open, about every 15 min when it isn't"]);
+    const comps = (state.ignite.enforcers || []).slice().sort((p, q) => p.age - q.age);
+    rows.push(["Computers", comps.length
+      ? comps.map((e) => `<span class="comp${e.age > 30 ? " stale" : ""}"><i></i>${esc(e.host)} <em>${e.age > 30 ? `last seen ${esc(fmtAgo(Date.now() / 1000 - e.age))}` : "online"}</em></span>`).join("")
+      : "None have checked in yet"]);
   }
-  $("#sync-status").textContent = text;
-  const viz = $("#link-viz");
-  viz.className = `link-viz ${syncState()}`;
-  $("#link-host").textContent = appInfo && appInfo.server_url ? appInfo.server_url.replace(/^https?:\/\//, "").split(/[:/]/)[0] : "Server";
+  $("#sync-facts").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v.startsWith("<") ? v : esc(v)}</dd>`).join("");
 }
 
 /* ---- saving: every edit saves itself a moment later, and anything pending goes when you leave */
@@ -1465,6 +1520,7 @@ $("#server-test").onclick = async () => {
   await new Promise((r) => setTimeout(r, 50)); // let "Checking…" paint before the blocking native call
   try {
     appInfo = await api("POST", "/native/app/server", { server_url: $("#server-url").value.trim() });
+    $("#sync-status").textContent = appInfo.server_url ? (syncState() === "up" ? "Connected. Saved." : "Saved, but it didn't connect.") : "Sync turned off.";
     paintSyncStatus();
     loadItems(); loadIgnite();
   } catch (e) { $("#sync-status").textContent = e.message; }
@@ -1868,3 +1924,8 @@ setInterval(() => {
   if (edge && serverNow() >= edge && !document.hidden) loadIgnite();
 }, 1000);
 setInterval(() => renderLists(), 60000);
+setInterval(() => {
+  if (document.hidden || state.page !== "settings" || !appInfo) return;
+  if (settingsPage === "sync") paintSyncStatus();
+  if (settingsPage === "home") paintSummaries();
+}, 5000);
