@@ -27,11 +27,19 @@ const state = {
   sort: { need: ls.getItem("ignition.sort.need") || "smart", want: ls.getItem("ignition.sort.want") || "smart" },
 };
 
+// When each reply was asked for and arrived, by the local clock, for working out the server's clock.
+const timing = new WeakMap();
+const stamp = (data, sent) => {
+  if (data && typeof data === "object") timing.set(data, [sent, Date.now() / 1000]);
+  return data;
+};
+
 async function api(method, path, body) {
+  const sent = Date.now() / 1000;
   if (NATIVE) {
     const res = JSON.parse(NATIVE.request(method, path, body ? JSON.stringify(body) : ""));
     if (res.status >= 400) throw new Error((res.body && res.body.error) || `Error ${res.status}`);
-    return res.body;
+    return stamp(res.body, sent);
   }
   const res = await fetch(path, {
     method,
@@ -40,7 +48,7 @@ async function api(method, path, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  return stamp(data, sent);
 }
 
 $$("path.flame").forEach((p) => p.setAttribute("d", window.FLAME_PATH || ""));
@@ -457,6 +465,22 @@ $("#add-form").addEventListener("submit", async (e) => {
 
 const R = 176, RING = 2 * Math.PI * R, CX = 200;
 const serverNow = () => Date.now() / 1000 + state.clockOffset;
+
+// The server says what time it is in whole seconds, so one reply only pins its clock to within a second:
+// it was at least `now` when the reply arrived, and under `now + 1` when the request went out. Each reply
+// narrows that window and the clock runs from the middle of it, so the countdown never lurches a second
+// every time it checks in. If the window turns inside out, a clock was changed: start again.
+const offsetWindow = { lo: -Infinity, hi: Infinity };
+function syncClock(s) {
+  const [sent, recv] = timing.get(s) || [Date.now() / 1000, Date.now() / 1000];
+  const lo = s.now - recv, hi = s.now + 1 - sent;
+  const w = offsetWindow;
+  if (lo > w.hi + 0.5 || hi < w.lo - 0.5) { w.lo = -Infinity; w.hi = Infinity; }
+  w.lo = Math.max(w.lo, lo);
+  w.hi = Math.min(w.hi, hi);
+  if (w.lo > w.hi) { w.lo = lo; w.hi = hi; }
+  state.clockOffset = (w.lo + w.hi) / 2;
+}
 let arming = null;
 let lastPhase = null;
 
@@ -473,7 +497,7 @@ function reloadIfStale(build) {
 function setIgnite(s, quiet) {
   reloadIfStale(s.build);
   const was = state.ignite;
-  state.clockOffset = s.now - Date.now() / 1000;
+  syncClock(s);
   state.ignite = s;
   if (!quiet && was.session && was.phase === "countdown" && s.phase === "burning" && s.session && s.session.id === was.session.id) {
     liftoff();
@@ -1917,12 +1941,16 @@ loadSettings();
 setInterval(() => { if (!document.hidden) loadIgnite(); }, 5000);
 setInterval(() => { if (!document.hidden && !addDialog.open) loadItems(); }, 30000);
 setInterval(() => { if (!document.hidden && state.page === "stats") loadBurns(); }, 30000);
-setInterval(() => {
+// The clock ticks just after each whole second of the server's time, which is when the readout's digits
+// change; a free-running 1 s interval drifts across that edge and shows a second twice, then skips one.
+(function tick() {
   const { phase, session } = state.ignite;
   if (phase !== "idle" || arming) renderIgnite();
   const edge = phase === "countdown" ? session.starts_at : phase === "burning" ? session.ends_at : null;
   if (edge && serverNow() >= edge && !document.hidden) loadIgnite();
-}, 1000);
+  const t = serverNow();
+  setTimeout(tick, (Math.floor(t) + 1 - t) * 1000 + 20);
+})();
 setInterval(() => renderLists(), 60000);
 setInterval(() => {
   if (document.hidden || state.page !== "settings" || !appInfo) return;
