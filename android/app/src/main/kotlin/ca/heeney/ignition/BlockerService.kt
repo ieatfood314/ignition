@@ -112,48 +112,45 @@ class BlockerService : AccessibilityService() {
      * The URL of the page the browser is showing, or null. Returns null while you're typing in the
      * address bar: autocomplete fills it with suggestions ("you" -> "youtube.com") and the suggestion
      * list is full of URLs, none of which you've opened. Once a page loads the bar loses focus.
+     *
+     * Only the browser's own toolbar is read, never the page: a news article that mentions reddit.com
+     * mustn't kick you out.
      */
     private fun addressBarText(pkg: String): String? {
         val root = rootInActiveWindow ?: return null
         try {
+            if (root.packageName?.toString() != pkg) return null
             val typing = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.isEditable == true
             if (typing) return null
-            for (id in URL_BAR_IDS) {
-                // Classic Android view ids are "pkg:id/name"; Compose testTags (ADDRESSBAR_URL) are the
-                // bare string. Firefox's redesigned toolbar is Compose, so try both forms.
-                val forms = if (id.contains(":")) listOf(id) else listOf(id, "$pkg:id/$id")
-                for (form in forms) {
-                    for (n in root.findAccessibilityNodeInfosByViewId(form)) {
-                        if (n.isFocused) continue
-                        val t = n.text ?: n.contentDescription
-                        if (!t.isNullOrBlank()) return t.toString()
-                    }
-                }
-            }
-            // Fallback for browsers we don't have an id for: an unfocused text field outside any list
-            // (suggestion rows and top-site tiles are list items).
             return scanForUrl(root)
         } finally {
             root.recycle()
         }
     }
 
+    /**
+     * Walks the browser's own views (not the web page, not list rows such as suggestions or top sites)
+     * for an address bar: first anything whose view id says it's one (Firefox's Compose
+     * ADDRESSBAR_URL_BOX keeps the URL in its content description, Chrome's url_bar in its text), then
+     * any unfocused text field, for browsers that name theirs something else.
+     */
     private fun scanForUrl(root: AccessibilityNodeInfo): String? {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var seen = 0
-        while (queue.isNotEmpty() && seen < 500) {
+        var field: String? = null
+        while (queue.isNotEmpty() && seen < 800) {
             val n = queue.removeFirst()
             seen++
-            if (n.collectionItemInfo != null) continue
-            val field = n.isEditable || n.className?.contains("EditText") == true
-            if (field && !n.isFocused) {
-                val t = n.text ?: n.contentDescription
-                if (!t.isNullOrBlank()) return t.toString()
+            if (n.collectionItemInfo != null || n.className?.contains("WebView") == true) continue
+            val text = (n.text?.takeIf { it.isNotBlank() } ?: n.contentDescription)?.toString()
+            if (!text.isNullOrBlank() && !n.isFocused && Blocking.hostsIn(text).isNotEmpty()) {
+                if (Blocking.isUrlBarId(n.viewIdResourceName)) return text
+                if (field == null && (n.isEditable || n.className?.contains("EditText") == true)) field = text
             }
             for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
         }
-        return null
+        return field
     }
 
     // ---- "every game"
@@ -185,14 +182,6 @@ class BlockerService : AccessibilityService() {
         fun recheck() {
             main.post { instance?.checkForeground() }
         }
-
-        // Fenix/Firefox (view id + the Compose test tag it exposes as a resource id), Chromium (Chrome,
-        // Brave, Edge, Vivaldi...), Samsung Internet, DuckDuckGo, Opera. Anything else gets scanForUrl.
-        private val URL_BAR_IDS = listOf(
-            "mozac_browser_toolbar_url_view", "ADDRESSBAR_URL", "mozac_browser_toolbar_origin_view",
-            "com.android.chrome:id/url_bar", "url_bar",
-            "location_bar_edit_text", "omnibarTextInput", "url_field",
-        )
 
         /**
          * Whether [pkg] is a browser: it opens any web link. Apps that only open their own site's links

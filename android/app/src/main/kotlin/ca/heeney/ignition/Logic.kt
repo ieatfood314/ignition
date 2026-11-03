@@ -48,6 +48,39 @@ object Logic {
     fun scrubUntil(s: JSONObject): Long = maxOf(s.optLong("created_at") + SCRUB_GRACE, s.optLong("starts_at") - SCRUB_LOCK)
     fun canScrub(s: JSONObject, t: Long = now()): Boolean = t < scrubUntil(s)
 
+    /**
+     * While a burn is on, or its countdown can no longer be scrubbed, the block list only grows: taking
+     * a site off it mid-burn would be a way out.
+     */
+    fun blockLocked(store: Store, t: Long = now()): Boolean {
+        val cur = current(store, t)
+        return cur.phase == "burning" || (cur.phase == "countdown" && !canScrub(cur.session!!, t))
+    }
+
+    /** The block list while it's locked: whatever [new] adds, plus everything [old] had. Both cleaned. */
+    fun ratchetBlock(old: JSONObject, new: JSONObject): JSONObject {
+        val out = JSONObject(new.toString())
+        for (key in listOf("sites", "programs")) {
+            val arr = out.getJSONArray(key)
+            val have = (0 until arr.length()).map { arr.getString(it) }.toHashSet()
+            val prev = old.optJSONArray(key) ?: JSONArray()
+            for (i in 0 until prev.length()) if (have.add(prev.getString(i))) arr.put(prev.getString(i))
+        }
+        val apps = out.getJSONArray("apps")
+        val ids = (0 until apps.length()).map { apps.getJSONObject(it).optString("id") }.toHashSet()
+        val prev = old.optJSONArray("apps") ?: JSONArray()
+        for (i in 0 until prev.length()) prev.optJSONObject(i)?.let { if (ids.add(it.optString("id"))) apps.put(it) }
+        out.put("games", new.optBoolean("games") || old.optBoolean("games"))
+        return out
+    }
+
+    /** [value] (already cleaned) as it may be saved now: the block list ratcheted if it's locked. */
+    fun lockSettings(store: Store, value: JSONObject, t: Long = now()): JSONObject {
+        if (!blockLocked(store, t)) return value
+        val old = store.settings.optJSONObject("block") ?: return value
+        return value.put("block", ratchetBlock(old, value.getJSONObject("block")))
+    }
+
     fun newSession(id: String, minutes: Int, startsAt: Long, source: String): JSONObject = JSONObject()
         .put("id", id).put("minutes", minutes).put("planned", minutes).put("created_at", now())
         .put("starts_at", startsAt).put("ends_at", startsAt + minutes * 60L)
@@ -196,6 +229,7 @@ object Logic {
             .put("session", cur.session ?: JSONObject.NULL)
             .put("next_schedule", nextSchedule(store, t) ?: JSONObject.NULL)
             .put("stats", stats(store, t))
+            .put("block_locked", blockLocked(store, t))
         cur.session?.let { s ->
             state.put("session_id", s.optString("id")).put("minutes", s.optInt("minutes"))
                 .put("started_at", s.optLong("starts_at")).put("ends_at", s.optLong("ends_at"))

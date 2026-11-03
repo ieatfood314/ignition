@@ -48,6 +48,29 @@ class BlockingTest {
     }
 
     @Test
+    fun readsFirefoxScreenReaderAddressBar() {
+        // Firefox 159's Compose toolbar: a View with this content description and no text.
+        val sites = listOf("youtube.com")
+        assertEquals("youtube.com", Blocking.blockedSiteIn(" m.youtube.com. Search or enter address", sites))
+        assertEquals("youtube.com", Blocking.blockedSiteIn("youtube.com, secure", sites))
+        assertNull(Blocking.blockedSiteIn(" en.wikipedia.org. Search or enter address", sites))
+    }
+
+    @Test
+    fun recognisesAddressBarIds() {
+        assertTrue(Blocking.isUrlBarId("ADDRESSBAR_URL_BOX"))
+        assertTrue(Blocking.isUrlBarId("ADDRESSBAR_URL"))
+        assertTrue(Blocking.isUrlBarId("org.mozilla.firefox:id/mozac_browser_toolbar_url_view"))
+        assertTrue(Blocking.isUrlBarId("com.android.chrome:id/url_bar"))
+        assertTrue(Blocking.isUrlBarId("com.duckduckgo.mobile.android:id/omnibarTextInput"))
+        assertTrue(Blocking.isUrlBarId("com.sec.android.app.sbrowser:id/location_bar_edit_text"))
+        assertFalse(Blocking.isUrlBarId("ADDRESSBAR_TABS_COUNTER"))
+        assertFalse(Blocking.isUrlBarId("com.android.chrome:id/url_action_button"))
+        assertFalse(Blocking.isUrlBarId("top_sites_list.top_site_item"))
+        assertFalse(Blocking.isUrlBarId(null))
+    }
+
+    @Test
     fun configReadsBlockDocument() {
         val settings = Logic.cleanSettings(
             JSONObject().put(

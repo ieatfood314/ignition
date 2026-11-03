@@ -73,6 +73,44 @@ class LogicTest {
     }
 
     @Test
+    fun blockListOnlyGrowsWhileBurning() {
+        val s = store()
+        val t = Logic.now()
+        val full = JSONObject().put("block", JSONObject()
+            .put("sites", JSONArray().put("youtube.com").put("reddit.com"))
+            .put("apps", JSONArray().put(JSONObject().put("id", "com.termux").put("label", "Termux")))
+            .put("games", true).put("programs", JSONArray().put("vlc")))
+        s.putSettings(Logic.cleanSettings(full))
+        val stripped = Logic.cleanSettings(JSONObject().put("block", JSONObject().put("sites", JSONArray().put("example.com"))))
+
+        // Idle: anything goes.
+        assertFalse(Logic.blockLocked(s, t))
+        assertEquals(1, Logic.lockSettings(s, JSONObject(stripped.toString()), t).getJSONObject("block").getJSONArray("sites").length())
+
+        // Burning: additions stick, removals don't.
+        s.putSession(Logic.newSession("a", 30, t, "manual"))
+        assertTrue(Logic.blockLocked(s, t + 1))
+        val b = Logic.lockSettings(s, JSONObject(stripped.toString()), t + 1).getJSONObject("block")
+        assertEquals(listOf("example.com", "youtube.com", "reddit.com"), (0 until 3).map { b.getJSONArray("sites").getString(it) })
+        assertEquals("com.termux", b.getJSONArray("apps").getJSONObject(0).getString("id"))
+        assertTrue(b.getBoolean("games"))
+        assertEquals("vlc", b.getJSONArray("programs").getString(0))
+        assertTrue(Logic.igniteState(s, t + 1).getBoolean("block_locked"))
+
+        // After the burn it unlocks.
+        assertFalse(Logic.blockLocked(s, t + 31 * 60))
+    }
+
+    @Test
+    fun blockLocksWithTheCountdownScrub() {
+        val s = store()
+        val t = Logic.now()
+        s.putSession(Logic.newSession("a", 30, t + 30 * 60, "manual"))
+        assertFalse(Logic.blockLocked(s, t + 30)) // could still scrub
+        assertTrue(Logic.blockLocked(s, t + 61))
+    }
+
+    @Test
     fun statsCountOnlyBurnedTime() {
         val s = store()
         val t = Logic.now()

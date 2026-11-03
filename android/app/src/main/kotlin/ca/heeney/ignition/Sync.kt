@@ -98,9 +98,17 @@ object Sync {
             resp.optJSONObject("settings")?.let { remote ->
                 val at = remote.optLong("updated_at")
                 if (!store.settingsDirty || at >= store.settingsUpdatedAt) {
-                    store.settings = remote.optJSONObject("value") ?: Store.defaultSettings()
+                    val value = Logic.cleanSettings(remote.optJSONObject("value") ?: JSONObject())
+                    val locked = Logic.lockSettings(store, JSONObject(value.toString()))
+                    store.settings = locked
                     store.settingsUpdatedAt = at
                     store.settingsDirty = false
+                    if (locked.toString() != value.toString()) {
+                        // A burn the server didn't know about yet: keep what it tried to unblock, and
+                        // send the list back so the server keeps it too.
+                        store.settingsUpdatedAt = at + 1
+                        store.settingsDirty = true
+                    }
                     changed = true
                 }
             }

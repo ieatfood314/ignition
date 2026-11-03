@@ -510,6 +510,10 @@ function setIgnite(s, quiet) {
   state.stopping = false;
   renderIgnite();
   if (state.page === "settings") paintSummaries(); // the goal gauges and the board follow the burns
+  if (state.page === "settings" && editBlock && !!was.block_locked !== !!s.block_locked) {
+    renderBlock();
+    if (settingsPage === "apps" && installedApps) renderAppPicker();
+  }
 }
 
 async function loadIgnite() {
@@ -1082,21 +1086,31 @@ function tagEl(label, title, onRemove) {
   const li = $("#tpl-tag").content.firstElementChild.cloneNode(true);
   $(".tag-label", li).textContent = label;
   if (title) li.title = title;
-  $(".tag-x", li).onclick = onRemove;
+  if (onRemove) $(".tag-x", li).onclick = onRemove;
+  else $(".tag-x", li).remove();
   return li;
 }
+
+// During a burn (or a countdown past scrubbing) the block list only grows; the server enforces it too.
+// Things added since the last save can still come off.
+const blockLocked = () => !!state.ignite.block_locked && !!settingsDoc;
+const lockedBlock = () => (blockLocked() ? settingsDoc.block : { sites: [], programs: [], apps: [], games: false });
 
 let seenTags = null;
 function renderBlock() {
   const b = editBlock;
+  const held = lockedBlock();
+  const rm = (on, fn) => (on ? null : fn);
+  $("#block-lock").hidden = !blockLocked();
   const keys = new Set([...b.sites.map((x) => `s:${x}`), ...b.programs.map((x) => `p:${x}`), ...b.apps.map((x) => `a:${x.id}`)]);
   const fresh = seenTags ? [...keys].filter((k) => !seenTags.has(k)) : [];
   seenTags = keys;
-  $("#block-sites").replaceChildren(...b.sites.map((s) => tagEl(s, null, () => { b.sites = b.sites.filter((x) => x !== s); blockEdited(); })));
-  $("#block-programs").replaceChildren(...b.programs.map((p) => tagEl(p, null, () => { b.programs = b.programs.filter((x) => x !== p); blockEdited(); })));
+  $("#block-sites").replaceChildren(...b.sites.map((s) => tagEl(s, null, rm(held.sites.includes(s), () => { b.sites = b.sites.filter((x) => x !== s); blockEdited(); }))));
+  $("#block-programs").replaceChildren(...b.programs.map((p) => tagEl(p, null, rm(held.programs.includes(p), () => { b.programs = b.programs.filter((x) => x !== p); blockEdited(); }))));
   const apps = [...b.apps].sort((x, y) => x.label.localeCompare(y.label));
-  $("#block-apps").replaceChildren(...apps.map((a) => tagEl(a.label, a.id, () => { b.apps = b.apps.filter((x) => x.id !== a.id); blockEdited(); })));
+  $("#block-apps").replaceChildren(...apps.map((a) => tagEl(a.label, a.id, rm(held.apps.some((x) => x.id === a.id), () => { b.apps = b.apps.filter((x) => x.id !== a.id); blockEdited(); }))));
   $("#block-games").checked = b.games;
+  $("#block-games").disabled = held.games;
   const flash = (sel, pre, list) => $$(`${sel} li`).forEach((li, i) => { if (fresh.includes(pre + list[i])) li.classList.add("new"); });
   flash("#block-sites", "s:", b.sites);
   flash("#block-programs", "p:", b.programs);
@@ -1152,9 +1166,10 @@ function renderAppPicker() {
   if (!editBlock) return;
   const q = $("#app-search").value.trim().toLowerCase();
   const chosen = new Set(editBlock.apps.map((a) => a.id));
+  const held = new Set(lockedBlock().apps.map((a) => a.id));
   const list = installedApps.filter((a) => !q || a.label.toLowerCase().includes(q) || a.id.includes(q));
   $("#app-pick").innerHTML = list.map((a) => `
-    <li><label><input type="checkbox" data-id="${esc(a.id)}" ${chosen.has(a.id) ? "checked" : ""}>
+    <li><label><input type="checkbox" data-id="${esc(a.id)}" ${chosen.has(a.id) ? "checked" : ""} ${held.has(a.id) ? "disabled" : ""}>
       <span>${esc(a.label)}${a.game ? ' <em class="game">game</em>' : ""}<small>${esc(a.id)}</small></span></label></li>`).join("");
   $$("#app-pick input").forEach((cb) => cb.onchange = () => {
     const app = installedApps.find((a) => a.id === cb.dataset.id);
@@ -1530,6 +1545,7 @@ async function saveSettings() {
   try {
     settingsDoc = await api("PUT", "/api/settings", readSettingsForm());
     state.settings = settingsDoc;
+    if (stable(settingsDoc.block) !== stable(editBlock)) { editBlock = JSON.parse(JSON.stringify(settingsDoc.block)); renderBlock(); }
     loadIgnite();
   } catch (e) { toast(`Couldn't save: ${e.message}`); }
 }

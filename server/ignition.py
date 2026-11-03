@@ -32,6 +32,7 @@ SCRUB_GRACE = 60  # ...unless it was set less than this many seconds ago
 MAX_MINUTES = 12 * 60
 MAX_DELAY = 24 * 60
 SCHEDULE_WINDOW = 120  # seconds after a scheduled time during which it may still fire
+SYNC_SLACK = 300  # how far back a synced "ignite now" may claim a locked countdown lifted off
 
 ITEM_FIELDS = ("list", "title", "estimate_min", "due", "priority", "notes", "created_at", "done_at")
 SESSION_FIELDS = ("minutes", "planned", "created_at", "starts_at", "ends_at", "stopped_at", "source")
@@ -262,6 +263,17 @@ def clean_block(body):
     return {"sites": sites, "apps": apps, "games": bool(body.get("games")), "programs": programs}
 
 
+def ratchet_block(old, new):
+    """The block list while it's locked: whatever [new] adds, plus everything [old] had. Nothing comes off."""
+    out = {k: list(new[k]) for k in ("sites", "programs")}
+    for k in ("sites", "programs"):
+        out[k] += [v for v in old[k] if v not in out[k]]
+    ids = {a["id"] for a in new["apps"]}
+    out["apps"] = list(new["apps"]) + [a for a in old["apps"] if a["id"] not in ids]
+    out["games"] = new["games"] or old["games"]
+    return out
+
+
 def clean_launch_window(body):
     d = DEFAULT_LAUNCH_WINDOW
     return {
@@ -394,6 +406,8 @@ class App:
     def put_settings(self, body, updated_at=None):
         value = clean_settings(body)
         with self.s.lock:
+            if self.block_locked():
+                value["block"] = ratchet_block(self.settings()[0]["block"], value["block"])
             self.s.x(
                 "INSERT INTO kv (key, value, updated_at, rev) VALUES ('settings', ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, rev=excluded.rev",
@@ -419,6 +433,13 @@ class App:
         if live:
             return "countdown", live[0]
         return "idle", None
+
+    def block_locked(self, t=None):
+        """While a burn is on, or its countdown can no longer be scrubbed, the block list only grows:
+        taking a site off it mid-burn would be a way out."""
+        t = t or now()
+        phase, row = self.current(t)
+        return phase == "burning" or (phase == "countdown" and t >= self.scrub_until(row))
 
     @staticmethod
     def scrub_until(row):
@@ -613,6 +634,7 @@ class App:
             "now": t, "phase": phase, "active": phase == "burning", "enforcers": enforcers,
             "session": self.session_out(row) if row else None,
             "next_schedule": self.next_schedule(t), "stats": self.stats(t), "build": web_build(),
+            "block_locked": self.block_locked(t),
         }
         if row:
             planned = row["planned"] or row["minutes"]
@@ -705,12 +727,44 @@ class App:
             return
         f.update(updated_at=incoming_at, deleted=1 if se.get("deleted") else 0, rev=self.s.next_rev())
         if cur:
+            f = self.guard_session(self.s.q("SELECT * FROM sessions WHERE uid=?", (uid,))[0], f, now())
             self.s.x(f"UPDATE sessions SET {', '.join(f'{k}=?' for k in f)} WHERE uid=?", [*f.values(), uid])
         else:
             f["uid"] = uid
             f.setdefault("planned", f["minutes"])
             f.setdefault("created_at", now())
             self.s.x(f"INSERT INTO sessions ({', '.join(f)}) VALUES ({', '.join('?' for _ in f)})", list(f.values()))
+
+
+    def guard_session(self, cur, f, t):
+        """Sync gets the same rules as the buttons. A burn that's on, or a countdown past scrubbing, can't
+        be stopped (unless it's long enough to stop early), deleted, shortened or pushed back by a client
+        sending an edited copy. Whatever had to be undone is stored with a newer updated_at, so it goes
+        back to the client and overrides its copy."""
+        if cur["deleted"] or cur["stopped_at"] is not None or cur["ends_at"] <= t:
+            return f
+        burning = cur["started_at"] <= t
+        if not burning and t < self.scrub_until(cur):
+            return f
+        g = dict(f)
+        can_stop = burning and (cur["planned"] or cur["minutes"]) > EARLY_STOP_OVER_MINUTES
+        if g.get("deleted"):
+            g["deleted"] = 0
+            if can_stop:
+                g["stopped_at"] = g.get("stopped_at") or t
+        if g.get("stopped_at") is not None and not can_stop:
+            g["stopped_at"] = None
+        start = g.get("started_at", cur["started_at"])
+        length = max(cur["ends_at"] - cur["started_at"], g.get("ends_at", cur["ends_at"]) - start)
+        if burning or start > cur["started_at"]:
+            start = cur["started_at"]
+        else:
+            start = max(start, t - SYNC_SLACK)  # "ignite now": it lifts off now, not in the past
+        g.update(started_at=start, ends_at=start + length, planned=cur["planned"],
+                 minutes=max(cur["minutes"], g.get("minutes") or 0))
+        if any(k in f and f[k] != g[k] for k in g):
+            g["updated_at"] = f["updated_at"] + 1
+        return g
 
 
 # ---------------------------------------------------------------- http

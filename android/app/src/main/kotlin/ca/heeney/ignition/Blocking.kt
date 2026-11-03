@@ -19,7 +19,21 @@ object Blocking {
     )
 
     private val SITE = Regex("^[a-z0-9-]+(\\.[a-z0-9-]+)+(:\\d{1,5})?$")
-    private val HOSTLIKE = Regex("(?:[a-z][a-z0-9+.-]*://)?((?:[a-z0-9-]+\\.)+[a-z]{2,63})(:\\d{1,5})?(?=[/?#\\s]|$)", RegexOption.IGNORE_CASE)
+    // A host may be followed by a path, whitespace or sentence punctuation: Firefox's address bar reads
+    // " m.youtube.com. Search or enter address" to a screen reader.
+    private val HOSTLIKE = Regex("(?:[a-z][a-z0-9+.-]*://)?((?:[a-z0-9-]+\\.)+[a-z]{2,63})(:\\d{1,5})?(?=[/?#\\s.,;)]|$)", RegexOption.IGNORE_CASE)
+
+    /**
+     * Whether a view id looks like a browser's address bar: "com.android.chrome:id/url_bar",
+     * Firefox's Compose tags ADDRESSBAR_URL / ADDRESSBAR_URL_BOX, "omnibarTextInput", "location_bar_edit_text"...
+     * Browsers rename these often, so match the idea rather than a list.
+     */
+    fun isUrlBarId(id: String?): Boolean {
+        val name = id?.substringAfter(":id/") ?: return false
+        return URL_BAR_WORDS.containsMatchIn(name) && !NOT_URL_BAR.containsMatchIn(name)
+    }
+    private val URL_BAR_WORDS = Regex("url|address|omnibar|omnibox|location_bar|origin_view", RegexOption.IGNORE_CASE)
+    private val NOT_URL_BAR = Regex("suggest|clear|button|icon|menu|qr|mic|voice|tabs|counter", RegexOption.IGNORE_CASE)
 
     fun config(settings: JSONObject): Config {
         val b = settings.optJSONObject("block") ?: JSONObject()
