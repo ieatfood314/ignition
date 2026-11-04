@@ -21,7 +21,8 @@ Start with `docs/advanced.md`. Its "Pieces" section maps the repo, "Building" co
 - **The rules are written twice.** A change to the burn rules or an API endpoint in `server/ignition.py` usually needs the same change in `LocalApi.kt` and `Logic.kt`. Otherwise the phone and the computers disagree, and sync carries the disagreement both ways.
 - **Every commit on `main` that touches `android/` or `web/` becomes a public release.** The autobuild publishes it and Obtainium installs it on the phone. Don't bump versions or tag by hand; the version is the commit count.
 - **Test servers can touch real data.** A machine running ignition already has a live server on 4580, using the default database. Start a test server with its own `--port` and `--db`, for example `python3 -I server/ignition.py --port 4597 --db /tmp/ign-test.db`.
-- **Getting changes live:** the server reads `web/` on every request, so web changes are live as soon as they're merged. Changes to `server/` need the service restarted.
+- **Getting changes live:** the server reads `web/` on every request, so web changes are live as soon as they're merged. Changes to `server/` need `ignition.service` (a user unit running from `~/src/ignition`) restarted.
+- **regolith and mars update from GitHub main.** `update.sh` brings them enforcer and widget changes and overwrites anything hand-copied.
 - **Tests:**
   - JVM tests are in `android/app/src/test`. The "Building" section of `docs/advanced.md` shows how to run them against a live server.
   - The server has no test suite. Check changes against a test server.
