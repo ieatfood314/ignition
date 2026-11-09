@@ -512,6 +512,7 @@ function setIgnite(s, quiet) {
   if (state.page === "settings") paintSummaries(); // the goal gauges and the board follow the burns
   if (state.page === "settings" && editBlock && !!was.block_locked !== !!s.block_locked) {
     renderBlock();
+    fillEndEarly();
     if (settingsPage === "apps" && installedApps) renderAppPicker();
   }
 }
@@ -801,8 +802,9 @@ function renderIgnite() {
     $("#ignite-sub").textContent = launch.delay ? `Ignite · T−${fmtDelay(launch.delay)}` : "Ignite";
     paintSetting();
     paintDelay();
-    $("#abort-rule").textContent = launch.minutes > 60 ? "Hold to end early" : "Locked in. No ending early.";
-    $("#abort-rule").classList.toggle("locked", launch.minutes <= 60);
+    const over = s.end_early_over ?? 60;
+    $("#abort-rule").textContent = launch.minutes > over ? "Hold to end early" : "Locked in. No ending early.";
+    $("#abort-rule").classList.toggle("locked", launch.minutes <= over);
   }
   lastPhase = look;
 
@@ -1229,8 +1231,23 @@ function readSettingsForm() {
     schedules: readSchedules(),
     block: editBlock,
     launch_window: readWindow(),
+    end_early_over: readEndEarly(),
   };
 }
+
+// Mid-burn, ending early can only get harder; the server enforces it too.
+function readEndEarly() {
+  const v = parseInt($("#end-early").value, 10);
+  const min = blockLocked() ? settingsDoc.end_early_over : 0;
+  return Number.isNaN(v) ? settingsDoc.end_early_over : Math.max(min, Math.min(720, v));
+}
+// Shows the saved value, but not over one being typed unless [force].
+function fillEndEarly(force) {
+  const el = $("#end-early");
+  el.min = blockLocked() ? settingsDoc.end_early_over : 0;
+  if (force || document.activeElement !== el) el.value = settingsDoc.end_early_over;
+}
+$("#end-early").addEventListener("change", () => { if (!saveTimer) fillEndEarly(true); });
 
 const lamp = (k, st) => { const el = $(`#lamp-${k}`); if (el) el.className = `lamp ${st}`; };
 
@@ -1457,6 +1474,7 @@ function fillSettings(s) {
   fillWindow(s.launch_window);
   $("#lw-body").classList.toggle("off", !s.launch_window.enabled);
   renderBlock();
+  fillEndEarly(true);
   if (settingsPage === "apps" && installedApps) renderAppPicker();
 }
 
@@ -1528,6 +1546,7 @@ const stable = (v) => JSON.stringify(v, (k, x) => x && typeof x === "object" && 
 
 const settingsChanged = () => settingsDoc && stable(readSettingsForm()) !== stable({
   goals: settingsDoc.goals, schedules: settingsDoc.schedules, block: settingsDoc.block, launch_window: settingsDoc.launch_window,
+  end_early_over: settingsDoc.end_early_over,
 });
 
 let saveTimer = null;
@@ -1546,6 +1565,7 @@ async function saveSettings() {
     settingsDoc = await api("PUT", "/api/settings", readSettingsForm());
     state.settings = settingsDoc;
     if (stable(settingsDoc.block) !== stable(editBlock)) { editBlock = JSON.parse(JSON.stringify(settingsDoc.block)); renderBlock(); }
+    fillEndEarly();
     loadIgnite();
   } catch (e) { toast(`Couldn't save: ${e.message}`); }
 }

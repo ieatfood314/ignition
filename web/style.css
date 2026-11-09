@@ -535,6 +535,7 @@ dialog.meco h2 { margin: 4px 0 6px; font-size: 30px; font-weight: 500; letter-sp
 .hint { color: var(--faint); font-size: 13px; line-height: 1.5; margin: 0 0 10px; }
 .set-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; color: var(--muted); font-size: 14px; }
 .set-row label { width: 70px; }
+.set-row label.auto { width: auto; }
 .set-row input, .schedule input, .set-row.wide input {
   background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; font-size: 15px; min-width: 0;
 }

@@ -129,7 +129,7 @@ class LocalApi(private val context: Context) {
     fun stop(): JSONObject {
         val cur = Logic.current(store)
         if (cur.phase == "countdown") return scrub()
-        if (cur.phase == "burning" && !Logic.canStop(cur.session!!)) throw ApiError(403, "no way out")
+        if (cur.phase == "burning" && !Logic.canStop(cur.session!!, Logic.endEarlyOver(store))) throw ApiError(403, "no way out")
         if (cur.phase != "burning") return Logic.igniteState(store)
         return touchCurrent("burning") { it.put("stopped_at", Logic.now()) }
     }

@@ -57,8 +57,29 @@ class LogicTest {
         assertEquals("burning", Logic.current(s, t + 301).phase)
         // Extending to 80 min doesn't unlock "end early": planned stays 30.
         s.putSession(JSONObject(sess.toString()).put("minutes", 80))
-        assertFalse(Logic.canStop(s.sessions["a"]!!))
-        assertTrue(Logic.canStop(Logic.newSession("b", 90, t, "manual")))
+        assertFalse(Logic.canStop(s.sessions["a"]!!, 60))
+        assertTrue(Logic.canStop(Logic.newSession("b", 90, t, "manual"), 60))
+    }
+
+    @Test
+    fun endEarlyOverIsASettingThatOnlyRisesMidBurn() {
+        val s = store()
+        val t = Logic.now()
+        assertEquals(60, Logic.endEarlyOver(s))
+        assertEquals(720, Logic.cleanSettings(JSONObject().put("end_early_over", 5000)).getInt("end_early_over"))
+        s.putSettings(Logic.cleanSettings(JSONObject().put("end_early_over", 120)))
+        s.putSession(Logic.newSession("a", 90, t, "manual"))
+        val st = Logic.igniteState(s, t + 1)
+        assertFalse(st.getBoolean("can_stop"))
+        assertEquals(120, st.getInt("end_early_over"))
+
+        // Mid-burn it can go up but not down.
+        val lower = Logic.cleanSettings(JSONObject().put("end_early_over", 30))
+        assertEquals(120, Logic.lockSettings(s, lower, t + 1).getInt("end_early_over"))
+        val higher = Logic.cleanSettings(JSONObject().put("end_early_over", 180))
+        assertEquals(180, Logic.lockSettings(s, higher, t + 1).getInt("end_early_over"))
+        // Idle again: anything goes.
+        assertEquals(30, Logic.lockSettings(s, Logic.cleanSettings(JSONObject().put("end_early_over", 30)), t + 91 * 60).getInt("end_early_over"))
     }
 
     @Test

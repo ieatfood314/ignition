@@ -171,7 +171,7 @@ or in a panel, where it shrinks to an icon and opens as a popup:
 - **Ignition**: the dial. Idle it's a flame; click it to arm a burn (3, 2, 1, click again to scrub), with the
   burn length and T-minus set by − / + or the scroll wheel. During a T-minus: *Ignite now*, and *Scrub* until
   it locks an hour out. While burning: a ring of dots burning down, +5/+15/+30, and *Hold to end* for burns
-  over an hour. Also today's goal, the next scheduled launch (with *Skip*) and each computer's blocker. In a
+  long enough to end early (over an hour unless you change it). Also today's goal, the next scheduled launch (with *Skip*) and each computer's blocker. In a
   panel, the ring and the minutes left.
 - **Next up**: the top of the Need list in the website's order. Click a dot to check it off, or *+ Add* one.
   In a panel, how many are left, with an accent dot when something's due.
@@ -257,7 +257,7 @@ IGNITION_TEST_SERVER=http://127.0.0.1:4597 gradle testDebugUnitTest
 
 `GET/POST /api/items`, `PATCH/DELETE /api/items/<id>`, `GET /api/ignite`, `POST /api/ignite` (`minutes`,
 `delay`), `POST /api/ignite/{stop,scrub,now,extend,skip}`, `GET/PUT /api/settings` (goals, schedules,
-block, launch_window), `GET /api/stats`, `GET /api/burns` (every burn, for the Stats page), `POST /api/sync`, `GET /api/ping`,
+block, launch_window, end_early_over), `GET /api/stats`, `GET /api/burns` (every burn, for the Stats page), `POST /api/sync`, `GET /api/ping`,
 `POST /api/enforcer/heartbeat`.
 
 There's no authentication. Keep the server on localhost and your tailnet, which is what the installer does.

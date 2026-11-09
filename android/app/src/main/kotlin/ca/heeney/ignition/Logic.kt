@@ -17,7 +17,7 @@ fun JSONObject.stringOrNull(key: String): String? = if (!has(key) || isNull(key)
  * without a server. All functions expect the caller to hold the store's monitor. Times are unix seconds.
  */
 object Logic {
-    const val EARLY_STOP_OVER_MINUTES = 60
+    const val END_EARLY_OVER = 60 // default for settings.end_early_over
     const val MAX_MINUTES = 12 * 60
     const val MAX_DELAY = 24 * 60
     const val SCRUB_LOCK = 3600L // seconds before liftoff after which a countdown can't be scrubbed...
@@ -42,7 +42,10 @@ object Logic {
     }
 
     fun planned(s: JSONObject): Int = s.intOrNull("planned") ?: s.optInt("minutes")
-    fun canStop(s: JSONObject): Boolean = planned(s) > EARLY_STOP_OVER_MINUTES
+    fun endEarlyOver(store: Store): Int = store.settings.optInt("end_early_over", END_EARLY_OVER)
+
+    /** A burn longer than settings.end_early_over minutes (as first planned, not as extended) can be ended early. */
+    fun canStop(s: JSONObject, endEarlyOver: Int): Boolean = planned(s) > endEarlyOver
 
     /** When scrubbing this countdown stops being allowed: an hour out, or a minute after setting it. */
     fun scrubUntil(s: JSONObject): Long = maxOf(s.optLong("created_at") + SCRUB_GRACE, s.optLong("starts_at") - SCRUB_LOCK)
@@ -74,9 +77,13 @@ object Logic {
         return out
     }
 
-    /** [value] (already cleaned) as it may be saved now: the block list ratcheted if it's locked. */
+    /**
+     * [value] (already cleaned) as it may be saved now. While locked, the block list is ratcheted and
+     * ending early can only get harder.
+     */
     fun lockSettings(store: Store, value: JSONObject, t: Long = now()): JSONObject {
         if (!blockLocked(store, t)) return value
+        value.put("end_early_over", maxOf(endEarlyOver(store), value.optInt("end_early_over", END_EARLY_OVER)))
         val old = store.settings.optJSONObject("block") ?: return value
         return value.put("block", ratchetBlock(old, value.getJSONObject("block")))
     }
@@ -230,10 +237,11 @@ object Logic {
             .put("next_schedule", nextSchedule(store, t) ?: JSONObject.NULL)
             .put("stats", stats(store, t))
             .put("block_locked", blockLocked(store, t))
+            .put("end_early_over", endEarlyOver(store))
         cur.session?.let { s ->
             state.put("session_id", s.optString("id")).put("minutes", s.optInt("minutes"))
                 .put("started_at", s.optLong("starts_at")).put("ends_at", s.optLong("ends_at"))
-                .put("can_stop", canStop(s))
+                .put("can_stop", canStop(s, endEarlyOver(store)))
             if (cur.phase == "countdown") state.put("scrub_until", scrubUntil(s))
         }
         return state
@@ -271,6 +279,8 @@ object Logic {
         out.put("schedules", scheds)
         out.put("block", cleanBlock(body.optJSONObject("block") ?: JSONObject()))
         out.put("launch_window", cleanLaunchWindow(body.optJSONObject("launch_window") ?: JSONObject()))
+        val over = if (body.has("end_early_over") && !body.isNull("end_early_over")) body.optInt("end_early_over", END_EARLY_OVER) else END_EARLY_OVER
+        out.put("end_early_over", over.coerceIn(0, MAX_MINUTES))
         return out
     }
 

@@ -111,7 +111,8 @@ on your block list is blocked, everywhere, until the ring burns down.
 
 - **A burn of an hour or less can't be ended early.** There's no stop button. It runs out when it runs out.
 - **Longer burns** get a hold-to-end button, because once in a while a two-hour block really does need to
-  end.
+  end. The hour is yours to change, under *Settings › Blocking › Ending early*. During a burn you can
+  only raise it.
 - **You can always add time** (+5, +15, +30), but never take it away.
 - **T-minus** starts a burn after a delay, so you can take a break first. You can ignite early any time, but
   you can only scrub it while liftoff is more than an hour away (or in the first minute after you set it).

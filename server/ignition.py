@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 LISTS = ("need", "want")
-EARLY_STOP_OVER_MINUTES = 60
+END_EARLY_OVER = 60  # default for settings.end_early_over: burns longer than this many minutes can be ended early
 SCRUB_LOCK = 3600  # seconds before liftoff after which a countdown can't be scrubbed...
 SCRUB_GRACE = 60  # ...unless it was set less than this many seconds ago
 MAX_MINUTES = 12 * 60
@@ -45,6 +45,7 @@ DEFAULT_SETTINGS = {
     "schedules": [],
     "block": {"sites": [], "apps": [], "games": False, "programs": []},
     "launch_window": DEFAULT_LAUNCH_WINDOW,
+    "end_early_over": END_EARLY_OVER,
 }
 
 SCHEMA = """
@@ -304,6 +305,8 @@ def clean_settings(body):
     s["schedules"] = scheds
     s["block"] = clean_block(body.get("block") or {})
     s["launch_window"] = clean_launch_window(body.get("launch_window") or {})
+    over = body.get("end_early_over")
+    s["end_early_over"] = clamp_int(END_EARLY_OVER if over is None else over, 0, MAX_MINUTES, END_EARLY_OVER)
     return s
 
 
@@ -407,7 +410,10 @@ class App:
         value = clean_settings(body)
         with self.s.lock:
             if self.block_locked():
-                value["block"] = ratchet_block(self.settings()[0]["block"], value["block"])
+                # Mid-burn, ending early can only get harder.
+                old = self.settings()[0]
+                value["block"] = ratchet_block(old["block"], value["block"])
+                value["end_early_over"] = max(old["end_early_over"], value["end_early_over"])
             self.s.x(
                 "INSERT INTO kv (key, value, updated_at, rev) VALUES ('settings', ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, rev=excluded.rev",
@@ -433,6 +439,10 @@ class App:
         if live:
             return "countdown", live[0]
         return "idle", None
+
+    def can_stop(self, row):
+        """A burn longer than settings.end_early_over minutes (as first planned, not as extended) can be ended early."""
+        return (row["planned"] or row["minutes"]) > self.settings()[0]["end_early_over"]
 
     def block_locked(self, t=None):
         """While a burn is on, or its countdown can no longer be scrubbed, the block list only grows:
@@ -486,7 +496,7 @@ class App:
             if phase == "countdown":
                 return self.scrub()
             if phase == "burning":
-                if (row["planned"] or row["minutes"]) <= EARLY_STOP_OVER_MINUTES:
+                if not self.can_stop(row):
                     raise ApiError(403, "no way out")
                 self.touch_session(row, stopped_at=now())
         return self.ignite_state()
@@ -634,14 +644,13 @@ class App:
             "now": t, "phase": phase, "active": phase == "burning", "enforcers": enforcers,
             "session": self.session_out(row) if row else None,
             "next_schedule": self.next_schedule(t), "stats": self.stats(t), "build": web_build(),
-            "block_locked": self.block_locked(t),
+            "block_locked": self.block_locked(t), "end_early_over": self.settings()[0]["end_early_over"],
         }
         if row:
-            planned = row["planned"] or row["minutes"]
             state.update(
                 # Flat fields kept for the enforcers and older clients.
                 session_id=row["uid"], minutes=row["minutes"], started_at=row["started_at"],
-                ends_at=row["ends_at"], can_stop=planned > EARLY_STOP_OVER_MINUTES,
+                ends_at=row["ends_at"], can_stop=self.can_stop(row),
             )
             if phase == "countdown":
                 state["scrub_until"] = self.scrub_until(row)
@@ -747,7 +756,7 @@ class App:
         if not burning and t < self.scrub_until(cur):
             return f
         g = dict(f)
-        can_stop = burning and (cur["planned"] or cur["minutes"]) > EARLY_STOP_OVER_MINUTES
+        can_stop = burning and self.can_stop(cur)
         if g.get("deleted"):
             g["deleted"] = 0
             if can_stop:
