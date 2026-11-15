@@ -26,8 +26,6 @@
     </a>
     <nav class="tabs" aria-label="Pages">
       <a href="#ignite" data-tab="ignite"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M10 2h4"/></svg><span id="tab-ignite-label">Ignite</span></a>
-      <a href="#need" data-tab="need"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Need</span></a>
-      <a href="#want" data-tab="want"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><span>Want</span></a>
       <a href="#stats" data-tab="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-7M12 20V5M19 20v-10"/></svg><span>Stats</span></a>
       <i class="tab-ind" aria-hidden="true"></i>
     </nav>
@@ -95,40 +93,7 @@
           <p class="next-sched" id="next-sched" hidden></p>
           <ul class="enforcers" id="enforcers"></ul>
         </div>
-
-        <div class="up-next" id="up-next" hidden>
-          <h2 class="hud-h"><span>Up next</span></h2>
-          <ul></ul>
-        </div>
       </div>
-    </section>
-
-    <section id="page-need" class="page list-page" data-list="need" hidden>
-      <div class="page-head">
-        <h1>Need to do</h1>
-        <span class="count" id="count-need"></span>
-        <button class="sort-btn" type="button" data-sort-for="need"></button>
-      </div>
-      <ul class="items" id="items-need"></ul>
-      <p class="empty" id="empty-need" hidden>Nothing due. Suspicious.</p>
-      <details class="done-group" id="done-need" hidden>
-        <summary></summary>
-        <ul class="items done"></ul>
-      </details>
-    </section>
-
-    <section id="page-want" class="page list-page" data-list="want" hidden>
-      <div class="page-head">
-        <h1>Want to do</h1>
-        <span class="count" id="count-want"></span>
-        <button class="sort-btn" type="button" data-sort-for="want"></button>
-      </div>
-      <ul class="items" id="items-want"></ul>
-      <p class="empty" id="empty-want" hidden>Nothing here yet.</p>
-      <details class="done-group" id="done-want" hidden>
-        <summary></summary>
-        <ul class="items done"></ul>
-      </details>
     </section>
 
     <section id="page-stats" class="page" hidden>
@@ -308,7 +273,7 @@
             </div>
             <dl class="sync-facts" id="sync-facts"></dl>
             <h3>Server</h3>
-            <p class="hint">Optional. Shares lists, burns and settings with an ignition server and the computers using it.</p>
+            <p class="hint">Optional. Shares burns and settings with an ignition server and the computers using it.</p>
             <div class="set-row wide"><input id="server-url" type="url" inputmode="url" placeholder="http://my-server:8445" autocapitalize="off" spellcheck="false"></div>
             <div class="set-row wide"><button type="button" class="ghost small" id="server-test">Test &amp; save</button><span class="hint" id="sync-status"></span></div>
           </section>
@@ -316,29 +281,6 @@
       </div>
     </section>
   </main>
-
-  <button class="fab" id="fab" type="button" aria-label="Add">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-  </button>
-
-  <div class="menu" id="sort-menu" role="menu" hidden></div>
-
-  <dialog id="add-dialog" class="sheet">
-    <form method="dialog" id="add-form" autocomplete="off">
-      <div class="sheet-grip" aria-hidden="true"></div>
-      <div class="add-row">
-        <input id="add-title" name="title" placeholder="What needs doing?" required maxlength="500" enterkeyhint="done">
-        <button type="button" class="mini-plus" id="add-more" aria-label="Add details" aria-expanded="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>
-        </button>
-      </div>
-      <div class="fields" id="add-fields" hidden></div>
-      <div class="sheet-actions">
-        <button type="button" class="ghost" id="add-cancel">Cancel</button>
-        <button type="submit" class="primary" id="add-submit">Add</button>
-      </div>
-    </form>
-  </dialog>
 
   <dialog id="meco-dialog" class="sheet meco">
     <div class="sheet-grip" aria-hidden="true"></div>
@@ -360,40 +302,6 @@
 
   <div class="toast" id="toast" role="status" hidden></div>
   <div class="chart-tip" id="chart-tip" role="status" hidden></div>
-
-  <template id="tpl-fields">
-    <div class="field" data-field="estimate_min">
-      <span class="field-label">Time</span>
-      <div class="chips">
-        <button type="button" data-est="15">15m</button>
-        <button type="button" data-est="30">30m</button>
-        <button type="button" data-est="60">1h</button>
-        <button type="button" data-est="120">2h</button>
-        <input type="number" inputmode="numeric" min="0" placeholder="min" class="est-input" aria-label="Minutes">
-      </div>
-    </div>
-    <div class="field" data-field="due">
-      <span class="field-label">Due</span>
-      <div class="chips">
-        <button type="button" data-due="0">Today</button>
-        <button type="button" data-due="1">Tomorrow</button>
-        <input type="date" class="due-input" aria-label="Due date">
-      </div>
-    </div>
-    <div class="field" data-field="priority">
-      <span class="field-label">Priority</span>
-      <div class="seg">
-        <button type="button" data-pri="0">none</button>
-        <button type="button" data-pri="1">low</button>
-        <button type="button" data-pri="2">med</button>
-        <button type="button" data-pri="3">high</button>
-      </div>
-    </div>
-    <div class="field field-notes" data-field="notes">
-      <span class="field-label">Notes</span>
-      <textarea rows="3" placeholder="Links, sub-steps, context…"></textarea>
-    </div>
-  </template>
 
   <template id="tpl-schedule">
     <li class="schedule">

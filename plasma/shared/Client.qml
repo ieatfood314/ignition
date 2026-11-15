@@ -1,21 +1,17 @@
 import QtQuick
 
-// Talks to the ignition server, the same JSON API the website uses. It polls /api/ignite (and /api/items
-// if asked) and keeps `now` ticking in the server's clock so countdowns stay right on a skewed desktop.
+// Talks to the ignition server, the same JSON API the website uses. It polls /api/ignite and keeps `now` ticking in the server's clock so countdowns stay right on a skewed desktop.
 Item {
     id: client
 
     property string url: "http://127.0.0.1:4580"
-    property bool watchItems: false
     // Poll faster while something is happening, or while the widget is open.
     property bool eager: false
 
     property var ignite: null
-    property var items: []
     // Optimistic until the first reply says otherwise.
     property bool online: true
     property bool loaded: false
-    property bool itemsLoaded: false
     property real offset: 0
     property real now: Date.now() / 1000
 
@@ -80,22 +76,6 @@ Item {
             if (ok)
                 setIgnite(data);
         });
-        if (watchItems)
-            refreshItems();
-    }
-
-    property bool _itemsBusy: false
-    function refreshItems() {
-        if (_itemsBusy)
-            return;
-        _itemsBusy = true;
-        request("GET", "/api/items", null, (ok, data) => {
-            _itemsBusy = false;
-            if (ok) {
-                items = data;
-                itemsLoaded = true;
-            }
-        });
     }
 
     // POST an /api/ignite/... action; the reply is the new state.
@@ -105,25 +85,6 @@ Item {
                 setIgnite(data);
             else
                 failed(data);
-        });
-    }
-
-    function patchItem(id, patch, done) {
-        request("PATCH", "/api/items/" + encodeURIComponent(id), patch, (ok, data) => {
-            if (!ok)
-                failed(data);
-            if (done)
-                done(ok);
-            refreshItems();
-            refresh();
-        });
-    }
-
-    function addItem(body) {
-        request("POST", "/api/items", body, (ok, data) => {
-            if (!ok)
-                failed(data);
-            refreshItems();
         });
     }
 
@@ -137,12 +98,9 @@ Item {
 
     onUrlChanged: {
         _igniteBusy = false;
-        _itemsBusy = false;
         online = true;
         ignite = null;
-        items = [];
         loaded = false;
-        itemsLoaded = false;
         refresh();
     }
     Component.onCompleted: refresh()
@@ -152,12 +110,6 @@ Item {
         repeat: true
         interval: client.eager || client.phase !== "idle" ? 2000 : 5000
         onTriggered: client.refresh()
-    }
-    Timer {
-        running: client.watchItems
-        repeat: true
-        interval: client.eager ? 5000 : 20000
-        onTriggered: client.refreshItems()
     }
     Timer {
         running: client.phase !== "idle"

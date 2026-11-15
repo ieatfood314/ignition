@@ -58,18 +58,15 @@ object Sync {
     fun runWith(store: Store): Pair<String?, Boolean> {
         val url: String
         val req = JSONObject()
-        val pushedItems = HashMap<String, Long>()
         val pushedSessions = HashMap<String, Long>()
         var pushedSettingsAt = 0L
         synchronized(store) {
             url = store.serverUrl
             if (url.isEmpty()) return null to false
             req.put("since", store.rev)
-            val items = JSONArray()
-            for (id in store.dirtyItems) store.items[id]?.let { items.put(it); pushedItems[id] = it.optLong("updated_at") }
             val sessions = JSONArray()
             for (id in store.dirtySessions) store.sessions[id]?.let { sessions.put(it); pushedSessions[id] = it.optLong("updated_at") }
-            req.put("items", items).put("sessions", sessions)
+            req.put("sessions", sessions)
             if (store.settingsDirty) {
                 pushedSettingsAt = store.settingsUpdatedAt
                 req.put("settings", JSONObject().put("value", store.settings).put("updated_at", store.settingsUpdatedAt))
@@ -93,8 +90,7 @@ object Sync {
         var changed = false
         synchronized(store) {
             if (store.serverUrl != url) return null to false
-            changed = merge(resp.optJSONArray("items"), store.items, store.dirtyItems, pushedItems) or
-                merge(resp.optJSONArray("sessions"), store.sessions, store.dirtySessions, pushedSessions)
+            changed = merge(resp.optJSONArray("sessions"), store.sessions, store.dirtySessions, pushedSessions)
             resp.optJSONObject("settings")?.let { remote ->
                 val at = remote.optLong("updated_at")
                 if (!store.settingsDirty || at >= store.settingsUpdatedAt) {

@@ -14,17 +14,11 @@ const NATIVE = window.IgnitionNative || null;
 document.documentElement.classList.add(NATIVE ? "in-app" : "in-web");
 
 const state = {
-  items: [],
   ignite: { phase: "idle", active: false, enforcers: [] },
   settings: null,
   clockOffset: 0,
   page: "ignite",
   lastTab: "ignite",
-  expanded: new Set(),
-  pendingDelete: new Map(),
-  rendered: new Set(),
-  itemsJson: "",
-  sort: { need: ls.getItem("ignition.sort.need") || "smart", want: ls.getItem("ignition.sort.want") || "smart" },
 };
 
 // When each reply was asked for and arrived, by the local clock, for working out the server's clock.
@@ -58,7 +52,6 @@ $$("path.flame").forEach((p) => p.setAttribute("d", window.FLAME_PATH || ""));
 const DAY = 86400000;
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const parseDate = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 
 function fmtEstimate(min) {
   if (min == null) return "";
@@ -72,27 +65,6 @@ function fmtDuration(sec) {
   if (min < 60) return `${min}m`;
   const h = Math.floor(min / 60), m = min % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
-}
-
-function dueInfo(due) {
-  const diff = Math.round((parseDate(due) - startOfToday()) / DAY);
-  let text;
-  if (diff < -1) text = `${-diff}d overdue`;
-  else if (diff === -1) text = "Yesterday";
-  else if (diff === 0) text = "Today";
-  else if (diff === 1) text = "Tomorrow";
-  else if (diff < 7) text = parseDate(due).toLocaleDateString(undefined, { weekday: "short" });
-  else text = parseDate(due).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  return { text, hot: diff <= 0, diff };
-}
-
-function fmtAge(createdAt) {
-  const days = Math.floor((Date.now() / 1000 - createdAt) / 86400);
-  if (days < 1) return "added today";
-  if (days < 14) return `${days} day${days === 1 ? "" : "s"} on list`;
-  if (days < 60) return `${Math.floor(days / 7)} wk on list`;
-  if (days < 365) return `${Math.floor(days / 30)} mo on list`;
-  return `${(days / 365).toFixed(1)} yr on list`;
 }
 
 function fmtClock(sec) {
@@ -114,11 +86,6 @@ function fmtWhen(ts) {
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
 
-const ICON_CHECK = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
-const ICON_PLUS = '<svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>';
-const ICON_NOTE = '<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 9h6M9 13h6M9 17h3"/></svg>';
-const ICON_SORT = '<svg viewBox="0 0 24 24"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>';
-
 /* ---------------- toast ---------------- */
 
 let toastTimer;
@@ -130,336 +97,6 @@ function toast(text, action, onAction, ms = 4500) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
-
-/* ---------------- detail fields (shared by add sheet + items) ---------------- */
-
-function buildFields(container, list, values, onChange) {
-  container.replaceChildren($("#tpl-fields").content.cloneNode(true));
-  if (list === "want") $('[data-field="due"]', container).remove();
-  const v = { ...values };
-
-  const estChips = $$("[data-est]", container);
-  const estInput = $(".est-input", container);
-  const paintEst = () => {
-    estChips.forEach((b) => b.classList.toggle("on", Number(b.dataset.est) === v.estimate_min));
-    estInput.value = v.estimate_min != null && !estChips.some((b) => Number(b.dataset.est) === v.estimate_min) ? v.estimate_min : "";
-  };
-  estChips.forEach((b) => b.addEventListener("click", () => {
-    const n = Number(b.dataset.est);
-    v.estimate_min = v.estimate_min === n ? null : n;
-    paintEst(); onChange({ estimate_min: v.estimate_min });
-  }));
-  estInput.addEventListener("change", () => {
-    v.estimate_min = estInput.value === "" ? null : Math.max(0, parseInt(estInput.value, 10) || 0);
-    paintEst(); onChange({ estimate_min: v.estimate_min });
-  });
-  paintEst();
-
-  const dueField = $('[data-field="due"]', container);
-  if (dueField) {
-    const dueChips = $$("[data-due]", dueField);
-    const dueInput = $(".due-input", dueField);
-    const chipDate = (b) => isoDate(new Date(startOfToday().getTime() + Number(b.dataset.due) * DAY));
-    const paintDue = () => {
-      dueChips.forEach((b) => b.classList.toggle("on", v.due === chipDate(b)));
-      dueInput.value = v.due || "";
-    };
-    dueChips.forEach((b) => b.addEventListener("click", () => {
-      const d = chipDate(b);
-      v.due = v.due === d ? null : d;
-      paintDue(); onChange({ due: v.due });
-    }));
-    dueInput.addEventListener("change", () => {
-      v.due = dueInput.value || null;
-      paintDue(); onChange({ due: v.due });
-    });
-    paintDue();
-  }
-
-  const priBtns = $$("[data-pri]", container);
-  const paintPri = () => priBtns.forEach((b) => b.classList.toggle("on", Number(b.dataset.pri) === (v.priority || 0)));
-  priBtns.forEach((b) => b.addEventListener("click", () => {
-    v.priority = Number(b.dataset.pri);
-    paintPri(); onChange({ priority: v.priority });
-  }));
-  paintPri();
-
-  const notes = $("textarea", container);
-  notes.value = v.notes || "";
-  let notesTimer;
-  notes.addEventListener("input", () => {
-    v.notes = notes.value;
-    clearTimeout(notesTimer);
-    notesTimer = setTimeout(() => onChange({ notes: v.notes }, true), 500);
-  });
-  notes.addEventListener("blur", () => { clearTimeout(notesTimer); onChange({ notes: v.notes }, true); });
-
-  return () => v;
-}
-
-/* ---------------- sorting ---------------- */
-
-const SORTS = {
-  smart: "Smart",
-  due: "Due date",
-  time: "Quickest first",
-  priority: "Priority",
-  oldest: "Oldest first",
-  newest: "Newest first",
-  alpha: "A–Z",
-};
-
-const nullsLast = (a, b, cmp) => (a == null) - (b == null) || (a != null && b != null ? cmp(a, b) : 0);
-const byDue = (a, b) => nullsLast(a.due, b.due, (x, y) => x.localeCompare(y));
-const byTime = (a, b) => nullsLast(a.estimate_min, b.estimate_min, (x, y) => x - y);
-const byPri = (a, b) => b.priority - a.priority;
-const byOld = (a, b) => a.created_at - b.created_at;
-
-function sortItems(list, items, mode = state.sort[list]) {
-  const cmp = {
-    smart: list === "need" ? [byDue, byPri, byOld] : [byPri, byOld],
-    due: [byDue, byPri, byOld],
-    time: [byTime, byPri, byOld],
-    priority: list === "need" ? [byPri, byDue, byOld] : [byPri, byOld],
-    oldest: [byOld],
-    newest: [(a, b) => b.created_at - a.created_at],
-    alpha: [(a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" })],
-  }[mode] || [byOld];
-  return items.sort((a, b) => { for (const c of cmp) { const r = c(a, b); if (r) return r; } return 0; });
-}
-
-function paintSortButtons() {
-  $$(".sort-btn").forEach((b) => {
-    const mode = state.sort[b.dataset.sortFor];
-    b.innerHTML = `${ICON_SORT}<span>${SORTS[mode]}</span>`;
-    b.classList.toggle("on", mode !== "smart");
-  });
-}
-
-function openSortMenu(btn) {
-  const list = btn.dataset.sortFor;
-  const menu = $("#sort-menu");
-  menu.innerHTML = Object.entries(SORTS)
-    .filter(([k]) => !(list === "want" && k === "due"))
-    .map(([k, label]) => `<button type="button" role="menuitemradio" aria-checked="${state.sort[list] === k}" data-mode="${k}">${label}</button>`)
-    .join("");
-  $$("button", menu).forEach((b) => b.onclick = () => {
-    state.sort[list] = b.dataset.mode;
-    ls.setItem(`ignition.sort.${list}`, b.dataset.mode);
-    closeSortMenu();
-    paintSortButtons();
-    renderLists(true);
-  });
-  const r = btn.getBoundingClientRect();
-  menu.hidden = false;
-  menu.style.top = `${r.bottom + window.scrollY + 6}px`;
-  menu.style.left = `${Math.max(12, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 12))}px`;
-}
-const closeSortMenu = () => { $("#sort-menu").hidden = true; };
-$$(".sort-btn").forEach((b) => b.addEventListener("click", (e) => {
-  e.stopPropagation();
-  $("#sort-menu").hidden ? openSortMenu(b) : closeSortMenu();
-}));
-document.addEventListener("click", (e) => { if (!e.target.closest("#sort-menu")) closeSortMenu(); });
-
-/* ---------------- lists ---------------- */
-
-function metaHtml(it) {
-  const bits = [];
-  if (it.priority) bits.push(`<span class="pri p${it.priority}" title="priority"><i></i><i></i><i></i></span>`);
-  if (it.estimate_min != null) bits.push(`<span>${fmtEstimate(it.estimate_min)}</span>`);
-  if (it.list === "need" && it.due) {
-    const d = dueInfo(it.due);
-    bits.push(`<span class="${d.hot && !it.done_at ? "hot" : ""}">${esc(d.text)}</span>`);
-  }
-  if (it.list === "want") bits.push(`<span>${fmtAge(it.created_at)}</span>`);
-  if (it.notes && it.notes.trim()) bits.push(`<span class="has-notes" title="has notes">${ICON_NOTE}</span>`);
-  return bits.join("");
-}
-
-function itemEl(it) {
-  const li = document.createElement("li");
-  li.className = "item" + (it.done_at ? " is-done" : "") + (state.rendered.has(it.id) ? "" : " fresh");
-  li.dataset.id = it.id;
-  li.dataset.pri = it.priority;
-  const open = state.expanded.has(it.id);
-  li.innerHTML = `
-    <div class="item-row">
-      <button class="check" type="button" aria-label="${it.done_at ? "Mark not done" : "Mark done"}">${ICON_CHECK}</button>
-      <div class="item-main">
-        <div class="title">${esc(it.title)}</div>
-        <div class="meta">${metaHtml(it)}</div>
-      </div>
-      <button class="mini-plus" type="button" aria-label="Notes and details" aria-expanded="${open}">${ICON_PLUS}</button>
-    </div>`;
-  $(".check", li).onclick = () => toggleDone(it);
-  const toggle = () => { open ? state.expanded.delete(it.id) : state.expanded.add(it.id); renderLists(true); };
-  $(".mini-plus", li).onclick = toggle;
-  $(".item-main", li).onclick = toggle;
-  if (open) li.append(extraEl(it));
-  return li;
-}
-
-function extraEl(it) {
-  const wrap = document.createElement("div");
-  wrap.className = "item-extra";
-  const title = document.createElement("input");
-  title.className = "edit-title";
-  title.value = it.title;
-  title.maxLength = 500;
-  title.addEventListener("change", () => {
-    const t = title.value.trim();
-    if (!t) { title.value = it.title; return; }
-    patchItem(it.id, { title: t });
-  });
-  title.addEventListener("keydown", (e) => { if (e.key === "Enter") title.blur(); });
-  const fields = document.createElement("div");
-  fields.className = "fields";
-  buildFields(fields, it.list, it, (patch, quiet) => patchItem(it.id, patch, quiet));
-  const other = it.list === "need" ? "want" : "need";
-  const actions = document.createElement("div");
-  actions.className = "item-actions";
-  actions.innerHTML = `<button type="button" data-a="move">Move to ${other === "need" ? "Need" : "Want"}</button><button type="button" class="danger" data-a="del">Delete</button>`;
-  $('[data-a="move"]', actions).onclick = () => {
-    state.expanded.delete(it.id);
-    patchItem(it.id, { list: other });
-    toast(`Moved to ${other === "need" ? "Need to do" : "Want to do"}`);
-  };
-  $('[data-a="del"]', actions).onclick = () => deleteItem(it);
-  wrap.append(title, fields, actions);
-  return wrap;
-}
-
-function renderLists(force) {
-  const active = document.activeElement;
-  if (!force && active && active.closest(".item-extra")) return;
-  for (const list of ["need", "want"]) {
-    const all = state.items.filter((i) => i.list === list && !state.pendingDelete.has(i.id));
-    const open = sortItems(list, all.filter((i) => !i.done_at));
-    const done = all.filter((i) => i.done_at).sort((a, b) => b.done_at - a.done_at);
-    $(`#items-${list}`).replaceChildren(...open.map(itemEl));
-    $(`#count-${list}`).textContent = open.length || "";
-    $(`#empty-${list}`).hidden = open.length > 0;
-    const dg = $(`#done-${list}`);
-    dg.hidden = done.length === 0;
-    $("summary", dg).textContent = `Done · ${done.length}`;
-    $("ul", dg).replaceChildren(...done.slice(0, 100).map(itemEl));
-  }
-  state.rendered = new Set(state.items.map((i) => i.id));
-  renderUpNext();
-}
-
-function renderUpNext() {
-  const open = state.items.filter((i) => i.list === "need" && !i.done_at && !state.pendingDelete.has(i.id));
-  const next = sortItems("need", open, "smart").slice(0, 3);
-  const box = $("#up-next");
-  box.hidden = next.length === 0;
-  $("ul", box).innerHTML = next.map((it) => {
-    const right = [it.estimate_min != null ? fmtEstimate(it.estimate_min) : "", it.due ? dueInfo(it.due).text : ""].filter(Boolean).join(" · ");
-    return `<li><span>${esc(it.title)}</span><span>${esc(right)}</span></li>`;
-  }).join("");
-}
-
-function upsert(item) {
-  const i = state.items.findIndex((x) => x.id === item.id);
-  if (i >= 0) state.items[i] = item; else state.items.push(item);
-}
-
-async function loadItems() {
-  try {
-    const items = await api("GET", "/api/items");
-    const json = JSON.stringify(items);
-    if (json === state.itemsJson) return;
-    state.itemsJson = json;
-    state.items = items;
-    renderLists();
-  } catch (e) { console.error(e); }
-}
-
-async function patchItem(id, patch, quiet) {
-  const it = state.items.find((x) => x.id === id);
-  if (it) {
-    Object.assign(it, patch);
-    if ("done" in patch) it.done_at = patch.done ? Date.now() / 1000 : null;
-  }
-  if (!quiet) renderLists(true);
-  try {
-    upsert(await api("PATCH", `/api/items/${id}`, patch));
-    if (!quiet) renderLists(true);
-  } catch (e) {
-    toast(`Couldn't save: ${e.message}`);
-    loadItems();
-  }
-}
-
-function toggleDone(it) {
-  const nowDone = !it.done_at;
-  const row = $(`.item[data-id="${it.id}"]`);
-  if (row && nowDone) { row.classList.add("is-done", "burning-off"); FX.haptic("tick"); }
-  state.expanded.delete(it.id);
-  setTimeout(() => patchItem(it.id, { done: nowDone }), nowDone && !FX.reduced ? 620 : 0);
-  if (nowDone) toast("Done.", "Undo", () => patchItem(it.id, { done: false }));
-}
-
-function deleteItem(it) {
-  state.expanded.delete(it.id);
-  const timer = setTimeout(async () => {
-    state.pendingDelete.delete(it.id);
-    try { await api("DELETE", `/api/items/${it.id}`); } catch (e) { toast(`Couldn't delete: ${e.message}`); }
-    state.items = state.items.filter((x) => x.id !== it.id);
-  }, 5000);
-  state.pendingDelete.set(it.id, timer);
-  renderLists(true);
-  toast("Deleted.", "Undo", () => {
-    clearTimeout(state.pendingDelete.get(it.id));
-    state.pendingDelete.delete(it.id);
-    renderLists(true);
-  }, 5000);
-}
-
-/* ---------------- add sheet ---------------- */
-
-const addDialog = $("#add-dialog");
-let addList = "need";
-let getAddValues = () => ({});
-
-function openAdd() {
-  addList = state.page === "want" ? "want" : "need";
-  $("#add-title").placeholder = addList === "want" ? "What do you want to do?" : "What needs doing?";
-  $("#add-title").value = "";
-  $("#add-fields").hidden = true;
-  $("#add-more").setAttribute("aria-expanded", "false");
-  getAddValues = buildFields($("#add-fields"), addList, { priority: 0 }, () => {});
-  addDialog.showModal();
-  $("#add-title").focus();
-}
-
-$("#fab").onclick = openAdd;
-$("#add-cancel").onclick = () => addDialog.close();
-addDialog.addEventListener("click", (e) => { if (e.target === addDialog) addDialog.close(); });
-$("#add-more").onclick = () => {
-  const f = $("#add-fields");
-  f.hidden = !f.hidden;
-  $("#add-more").setAttribute("aria-expanded", String(!f.hidden));
-};
-$("#add-title").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); $("#add-form").requestSubmit(); }
-});
-$("#add-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const title = $("#add-title").value.trim();
-  if (!title) { $("#add-title").focus(); return; }
-  const v = getAddValues();
-  const body = { list: addList, title, estimate_min: v.estimate_min ?? null, priority: v.priority || 0, notes: v.notes || "" };
-  if (addList === "need") body.due = v.due || null;
-  addDialog.close();
-  try {
-    upsert(await api("POST", "/api/items", body));
-    renderLists(true);
-  } catch (err) {
-    toast(`Couldn't add: ${err.message}`);
-  }
-});
 
 /* ---------------- ignite ---------------- */
 
@@ -489,7 +126,7 @@ function reloadIfStale(build) {
   if (!build) return; // the Android app updates as a whole
   state.build = state.build || build;
   if (build === state.build) return;
-  const busy = arming || mainDial.dragging() || subDial.dragging() || addDialog.open || saveTimer || mecoDialog.open ||
+  const busy = arming || mainDial.dragging() || subDial.dragging() || saveTimer || mecoDialog.open ||
     ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
   if (!busy) location.reload();
 }
@@ -1525,7 +1162,7 @@ function paintSyncStatus() {
   }[link];
   const rows = [];
   if (link === "off") {
-    rows.push(["Now", "Lists, burns and settings stay on this phone"]);
+    rows.push(["Now", "Burns and settings stay on this phone"]);
   } else {
     rows.push(["Last synced", s.last_ok ? `${fmtTime(s.last_ok)} · ${fmtAgo(s.last_ok)}` : "Never"]);
     if (link === "down") rows.push(["Problem", `<b class="warn">${esc(s.last_error || "Can't reach the server")}</b>${s.last_error_at ? ` · ${esc(fmtAgo(s.last_error_at))}` : ""}`]);
@@ -1582,7 +1219,7 @@ $("#server-test").onclick = async () => {
     appInfo = await api("POST", "/native/app/server", { server_url: $("#server-url").value.trim() });
     $("#sync-status").textContent = appInfo.server_url ? (syncState() === "up" ? "Connected. Saved." : "Saved, but it didn't connect.") : "Sync turned off.";
     paintSyncStatus();
-    loadItems(); loadIgnite();
+    loadIgnite();
   } catch (e) { $("#sync-status").textContent = e.message; }
 };
 $("#dnd-toggle").onchange = async (e) => {
@@ -1888,7 +1525,7 @@ window.addEventListener("scroll", hideTip, { passive: true });
 
 /* ---------------- routing & lifecycle ---------------- */
 
-const TABS = ["ignite", "need", "want", "stats"];
+const TABS = ["ignite", "stats"];
 
 /** The little bar under (or over, on a phone) the open tab, sliding across when you switch. */
 function moveTabInd() {
@@ -1901,7 +1538,7 @@ function moveTabInd() {
 window.addEventListener("resize", moveTabInd);
 if (document.fonts) document.fonts.ready.then(moveTabInd);
 
-// Ignite is home: the app opens on the button, and the lists sit behind it. Settings is a page of its
+// Ignite is home: the app opens on the button, and Stats sits behind it. Settings is a page of its
 // own (#settings/<section>) that goes back to whichever tab you came from.
 function route() {
   const [hash] = location.hash.slice(1).split("/");
@@ -1909,8 +1546,6 @@ function route() {
   const was = state.page;
   state.page = page;
   if (TABS.includes(page)) state.lastTab = page;
-  if (addDialog.open) addDialog.close();
-  closeSortMenu();
   hideTip();
   $$(".page").forEach((p) => { p.hidden = p.id !== `page-${page}`; });
   $$(".tabs a").forEach((a) => a.classList.toggle("active", a.dataset.tab === page));
@@ -1927,8 +1562,6 @@ function route() {
   FX.dim(page === "ignite" ? 1 : 0.45);
   requestAnimationFrame(() => { aimSky(); aimEmbers(); });
   $("#settings-btn").classList.toggle("active", page === "settings");
-  $("#fab").hidden = page !== "need" && page !== "want";
-  $("#fab").setAttribute("aria-label", page === "want" ? "Add something you want to do" : "Add something that needs doing");
   if (was !== page) window.scrollTo(0, 0);
   if (was === "settings" && page !== "settings") flushSettings();
   if (page === "settings") {
@@ -1940,13 +1573,12 @@ function route() {
 
 // Hooks for the Android app.
 window.ignitionRefresh = () => {
-  loadItems(); loadIgnite(); loadSettings();
+  loadIgnite(); loadSettings();
   if (state.page === "settings" && NATIVE) loadAppInfo();
   if (state.page === "stats") loadBurns();
 };
 window.ignitionBack = () => {
-  if (!$("#sort-menu").hidden) { closeSortMenu(); return true; }
-  for (const d of [addDialog, mecoDialog]) if (d.open) { d.close(); return true; }
+  if (mecoDialog.open) { mecoDialog.close(); return true; }
   if (state.page === "settings") { settingsBack(); return true; }
   if (state.page !== "ignite") { location.hash = "ignite"; return true; }
   return false;
@@ -1954,28 +1586,22 @@ window.ignitionBack = () => {
 
 window.addEventListener("hashchange", route);
 document.addEventListener("keydown", (e) => {
-  if (addDialog.open || mecoDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (mecoDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
-  if (e.key === "n" || e.key === "+" || e.key === "a") { e.preventDefault(); openAdd(); }
   if (e.key === "1") location.hash = "ignite";
-  if (e.key === "2") location.hash = "need";
-  if (e.key === "3") location.hash = "want";
-  if (e.key === "4") location.hash = "stats";
+  if (e.key === "2") location.hash = "stats";
   if (e.key === ",") location.hash = "settings";
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { flushSettings(); return; }
-  loadItems(); loadIgnite(); loadSettings();
+  loadIgnite(); loadSettings();
   if (state.page === "stats") loadBurns();
 });
 
-paintSortButtons();
 route();
-loadItems();
 loadIgnite();
 loadSettings();
 setInterval(() => { if (!document.hidden) loadIgnite(); }, 5000);
-setInterval(() => { if (!document.hidden && !addDialog.open) loadItems(); }, 30000);
 setInterval(() => { if (!document.hidden && state.page === "stats") loadBurns(); }, 30000);
 // The clock ticks just after each whole second of the server's time, which is when the readout's digits
 // change; a free-running 1 s interval drifts across that edge and shows a second twice, then skips one.
@@ -1987,7 +1613,6 @@ setInterval(() => { if (!document.hidden && state.page === "stats") loadBurns();
   const t = serverNow();
   setTimeout(tick, (Math.floor(t) + 1 - t) * 1000 + 20);
 })();
-setInterval(() => renderLists(), 60000);
 setInterval(() => {
   if (document.hidden || state.page !== "settings" || !appInfo) return;
   if (settingsPage === "sync") paintSyncStatus();

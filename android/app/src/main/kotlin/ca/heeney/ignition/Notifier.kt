@@ -121,7 +121,7 @@ object Notifier {
             val elapsed = (Logic.now() - s.optLong("starts_at")).coerceIn(0, total)
             b.setWhen(s.optLong("ends_at") * 1000).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
                 .setContentTitle("Burning · locked until ${clock(context, s.optLong("ends_at"))}")
-                .setContentText(upNext(context) ?: "No way out. Get to work.")
+                .setContentText("No way out. Get to work.")
                 .setProgress(total.toInt(), elapsed.toInt(), false)
                 .addAction(Notification.Action.Builder(null, "+15 min", action(context, ACTION_EXTEND, 13) { it.putExtra("minutes", 15) }).build())
         }
@@ -212,10 +212,4 @@ object Notifier {
     }
 
     fun cancelLaunchWindow(context: Context) = context.getSystemService(NotificationManager::class.java).cancel(ID_WINDOW)
-
-    private fun upNext(context: Context): String? {
-        val store = Store.get(context)
-        val top = synchronized(store) { Widgets.upNext(store, 1).firstOrNull() } ?: return null
-        return "Up next: ${top.optString("title")}"
-    }
 }

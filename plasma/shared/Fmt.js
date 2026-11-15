@@ -46,32 +46,3 @@ function parseDate(s) {
     const [y, m, d] = String(s).split("-").map(Number);
     return new Date(y, m - 1, d);
 }
-
-// { text: "TOMORROW", hot: false }; hot means due today or late.
-function due(s) {
-    const d = parseDate(s);
-    if (isNaN(d))
-        return { text: String(s), hot: false };
-    const diff = Math.round((d - startOfToday()) / DAY);
-    let text;
-    if (diff < -1)
-        text = `${-diff}D LATE`;
-    else if (diff === -1)
-        text = "YESTERDAY";
-    else if (diff === 0)
-        text = "TODAY";
-    else if (diff === 1)
-        text = "TOMORROW";
-    else if (diff < 7)
-        text = Qt.formatDate(d, "ddd").toUpperCase();
-    else
-        text = Qt.formatDate(d, "MMM d").toUpperCase();
-    return { text, hot: diff <= 0 };
-}
-
-// The Need list's "smart" order, as on the website: due date, then priority, then oldest.
-function upNext(items) {
-    const nullsLast = (a, b, cmp) => (a == null) - (b == null) || (a != null && b != null ? cmp(a, b) : 0);
-    return items.filter((i) => i.list === "need" && !i.done_at && !i.deleted).sort((a, b) =>
-        nullsLast(a.due, b.due, (x, y) => x.localeCompare(y)) || b.priority - a.priority || a.created_at - b.created_at);
-}

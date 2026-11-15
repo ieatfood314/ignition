@@ -128,14 +128,13 @@ class MainActivity : Activity() {
     private fun renderWidgetPreviews() {
         val r = WidgetRenderer(this)
         val store = Store.get(this)
-        val (cur, next, stats, items, count) = synchronized(store) {
-            listOf(Logic.current(store), Logic.nextSchedule(store), Logic.stats(store), Widgets.upNext(store, 8), Widgets.openCount(store))
+        val (cur, next, stats) = synchronized(store) {
+            listOf(Logic.current(store), Logic.nextSchedule(store), Logic.stats(store))
         }
         val dir = getExternalFilesDir(null) ?: return
         @Suppress("UNCHECKED_CAST")
         val shots = mapOf(
             "ignite" to r.ignite(76f, 76f, cur as Logic.Current, next as JSONObject?, this),
-            "next" to r.nextUp(160f, 160f, items as List<JSONObject>, count as Int),
             "burn" to r.burn(160f, 76f, stats as JSONObject),
         )
         for ((name, layers) in shots) {

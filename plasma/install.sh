@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install (or update) ignition's KDE Plasma widgets for this user: Ignition, Next up and Burn goals.
+# Install (or update) ignition's KDE Plasma widgets for this user: Ignition and Burn goals.
 # install.sh runs this for you when it finds Plasma 6.
 #
 #   plasma/install.sh [--server URL]     the server the widgets talk to; by default the app on this
@@ -7,7 +7,7 @@
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
-widgets="ignition next goals"
+widgets="ignition goals"
 icons="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
 
 die() { printf 'ignition: %s\n' "$*" >&2; exit 1; }
@@ -37,6 +37,9 @@ for w in $widgets; do
         kpackagetool6 -t Plasma/Applet -i "$stage/$w" >/dev/null ||
         die "couldn't install the $w widget"
 done
+
+# Next up showed the to-do list, which ignition no longer has.
+kpackagetool6 -t Plasma/Applet -r ca.heeney.ignition.next >/dev/null 2>&1 || true
 
 mkdir -p "$icons"
 cp "$here/flame.svg" "$icons/ca.heeney.ignition.svg"

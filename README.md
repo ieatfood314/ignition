@@ -56,7 +56,7 @@ It asks for your password once, because blocking sites and closing programs need
 prints the address to open, normally **http://127.0.0.1:4580**. Bookmark it, then go to **⚙ → Blocking** to
 choose what gets blocked.
 
-On KDE Plasma it also adds three desktop and panel widgets: the Ignite dial, *Next up* and *Burn goals*. Right-click
+On KDE Plasma it also adds two desktop and panel widgets: the Ignite dial and *Burn goals*. Right-click
 the desktop, choose **Add Widgets** and search for *ignition*.
 
 You need Python 3 and systemd, which nearly every Linux desktop already has. To update later, run:
@@ -118,9 +118,6 @@ on your block list is blocked, everywhere, until the ring burns down.
   you can only scrub it while liftoff is more than an hour away (or in the first minute after you set it).
 - **When a burn ends**, you can light a *second stage* to keep going.
 
-The **Need** and **Want** tabs are two simple lists: things you need to do (with due dates) and things
-you'd like to do someday. The top of the Need list shows under the button as *Up next*.
-
 The **Stats** tab shows how much you've burned over the last week, month, year or all time, which hours of
 the week you burn in, and every burn you've done.
 
@@ -148,7 +145,7 @@ guards against is you. On a computer, `sudo systemctl stop ignition-enforcer` li
 Using that to check Reddit is between you and you.
 
 **How do I uninstall it?** On the phone, uninstall it like any other app. On a computer, run the command
-below. It won't run in the middle of a burn, and it keeps your lists in case you come back.
+below. It won't run in the middle of a burn, and it keeps your burns and settings in case you come back.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ieatfood314/ignition/main/uninstall.sh | sh

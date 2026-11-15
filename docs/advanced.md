@@ -165,7 +165,7 @@ sudo systemctl stop ignition-enforcer
 
 ## KDE Plasma widgets
 
-Three widgets for Plasma 6, in the same Nothing-style dot-matrix as the Android ones. Each works on the desktop
+Two widgets for Plasma 6, in the same Nothing-style dot-matrix as the Android ones. Each works on the desktop
 or in a panel, where it shrinks to an icon and opens as a popup:
 
 - **Ignition**: the dial. Idle it's a flame; click it to arm a burn (3, 2, 1, click again to scrub), with the
@@ -173,8 +173,6 @@ or in a panel, where it shrinks to an icon and opens as a popup:
   it locks an hour out. While burning: a ring of dots burning down, +5/+15/+30, and *Hold to end* for burns
   long enough to end early (over an hour unless you change it). Also today's goal, the next scheduled launch (with *Skip*) and each computer's blocker. In a
   panel, the ring and the minutes left.
-- **Next up**: the top of the Need list in the website's order. Click a dot to check it off, or *+ Add* one.
-  In a panel, how many are left, with an accent dot when something's due.
 - **Burn goals**: today and this week against your goals, and the last seven days as columns of dots. In a
   panel, a ring for today's goal.
 
@@ -204,7 +202,7 @@ a plain monospace otherwise. Plasma loads updated widgets when it restarts:
 - **Launch window:** a nudge, not a lock. Pick a daily stretch (say weekday afternoons). If you've been home
   a while and haven't started anything, it asks whether you want to light a T-minus. The phone recognises
   home from its Wi-Fi, with no location permission, and nothing leaves the device.
-- **Widgets** (Nothing-style, dot-matrix): *Ignite* (1×1), *Next up* (2×2), *Burn goals* (2×1).
+- **Widgets** (Nothing-style, dot-matrix): *Ignite* (1×1), *Burn goals* (2×1).
 - **Sync:** Settings → Sync → the server's address. Everything merges both ways, and the newest edit wins.
   A burn started on the phone reaches the enforcers within a second. One started elsewhere shows up when
   you open the app, or within about 15 minutes in the background.
@@ -255,7 +253,7 @@ IGNITION_TEST_SERVER=http://127.0.0.1:4597 gradle testDebugUnitTest
 
 ## API
 
-`GET/POST /api/items`, `PATCH/DELETE /api/items/<id>`, `GET /api/ignite`, `POST /api/ignite` (`minutes`,
+`GET /api/ignite`, `POST /api/ignite` (`minutes`,
 `delay`), `POST /api/ignite/{stop,scrub,now,extend,skip}`, `GET/PUT /api/settings` (goals, schedules,
 block, launch_window, end_early_over), `GET /api/stats`, `GET /api/burns` (every burn, for the Stats page), `POST /api/sync`, `GET /api/ping`,
 `POST /api/enforcer/heartbeat`.

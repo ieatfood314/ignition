@@ -220,13 +220,12 @@ class LogicTest {
     fun storeRoundTripsThroughDisk() {
         val f = File.createTempFile("ignition", ".json").also { it.delete() }
         val a = Store.open(f)
-        a.putItem(JSONObject().put("id", "i1").put("list", "need").put("title", "Essay").put("due", JSONObject.NULL).put("created_at", 1))
+        a.putSession(Logic.newSession("s1", 25, 1000, "manual"))
         a.serverUrl = "http://x"
         a.save()
         val b = Store.open(f)
-        assertEquals("Essay", b.items["i1"]!!.getString("title"))
-        assertTrue(b.items["i1"]!!.isNull("due"))
-        assertTrue("i1" in b.dirtyItems)
+        assertEquals(25, b.sessions["s1"]!!.getInt("minutes"))
+        assertTrue("s1" in b.dirtySessions)
         assertEquals("http://x", b.serverUrl)
         assertNull(b.lastSyncError)
         assertNotNull(b.settings.optJSONObject("goals"))

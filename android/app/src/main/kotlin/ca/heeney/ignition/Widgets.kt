@@ -8,9 +8,8 @@ import android.os.Build
 import android.os.Bundle
 import android.util.SizeF
 import android.widget.RemoteViews
-import org.json.JSONObject
 
-/** Shared plumbing for the three widgets: size handling, the two-layer layout, tap-to-open. */
+/** Shared plumbing for the two widgets: size handling, the two-layer layout, tap-to-open. */
 abstract class BaseWidget : AppWidgetProvider() {
     abstract val page: String
     abstract fun draw(context: Context, r: WidgetRenderer, widthDp: Float, heightDp: Float): WidgetRenderer.Layers
@@ -79,21 +78,6 @@ class IgniteWidget : BaseWidget() {
     }
 }
 
-class NextUpWidget : BaseWidget() {
-    override val page = "need"
-    override fun draw(context: Context, r: WidgetRenderer, widthDp: Float, heightDp: Float): WidgetRenderer.Layers {
-        val store = Store.get(context)
-        val (items, count) = synchronized(store) { Widgets.upNext(store, 8) to Widgets.openCount(store) }
-        return r.nextUp(widthDp, heightDp, items, count)
-    }
-
-    override fun describe(context: Context): String {
-        val store = Store.get(context)
-        val items = synchronized(store) { Widgets.upNext(store, 3) }
-        return if (items.isEmpty()) "Ignition: nothing to do" else "Next up: " + items.joinToString(", ") { it.optString("title") }
-    }
-}
-
 class BurnWidget : BaseWidget() {
     override val page = "stats"
     override fun draw(context: Context, r: WidgetRenderer, widthDp: Float, heightDp: Float): WidgetRenderer.Layers {
@@ -109,7 +93,7 @@ class BurnWidget : BaseWidget() {
 }
 
 object Widgets {
-    private val providers = listOf(IgniteWidget::class.java, NextUpWidget::class.java, BurnWidget::class.java)
+    private val providers = listOf(IgniteWidget::class.java, BurnWidget::class.java)
 
     fun updateAll(context: Context) {
         val manager = AppWidgetManager.getInstance(context)
@@ -120,18 +104,4 @@ object Widgets {
             ids.forEach { runCatching { provider.render(context, manager, it) } }
         }
     }
-
-    private fun open(store: Store) = store.items.values.filter {
-        !it.optBoolean("deleted") && it.optString("list") == "need" && it.isNull("done_at")
-    }
-
-    fun openCount(store: Store) = open(store).size
-
-    /** The need-to-do list in "smart" order (due date, then priority, then age), like the web UI. */
-    fun upNext(store: Store, n: Int): List<JSONObject> = open(store).sortedWith(
-        compareBy<JSONObject> { it.isNull("due") }
-            .thenBy { it.stringOrNull("due") ?: "" }
-            .thenByDescending { it.optInt("priority") }
-            .thenBy { it.optLong("created_at") },
-    ).take(n)
 }

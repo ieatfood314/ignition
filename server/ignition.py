@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Ignition: need-to-do / want-to-do lists and a focus timer that locks out distractions. Stdlib only.
+"""Ignition: a focus timer that locks out distractions. Stdlib only.
 
 Data model (shared with the Android app, which syncs through POST /api/sync):
-  items     uid, list, title, estimate_min, due, priority, notes, created_at, done_at
   sessions  uid, minutes, planned, created_at, starts_at, ends_at, stopped_at, source
   settings  one JSON document (goals, schedules)
 Every row carries updated_at (ms, last-writer-wins), deleted (tombstone) and rev (server change counter).
@@ -25,7 +24,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
-LISTS = ("need", "want")
 END_EARLY_OVER = 60  # default for settings.end_early_over: burns longer than this many minutes can be ended early
 SCRUB_LOCK = 3600  # seconds before liftoff after which a countdown can't be scrubbed...
 SCRUB_GRACE = 60  # ...unless it was set less than this many seconds ago
@@ -34,7 +32,6 @@ MAX_DELAY = 24 * 60
 SCHEDULE_WINDOW = 120  # seconds after a scheduled time during which it may still fire
 SYNC_SLACK = 300  # how far back a synced "ignite now" may claim a locked countdown lifted off
 
-ITEM_FIELDS = ("list", "title", "estimate_min", "due", "priority", "notes", "created_at", "done_at")
 SESSION_FIELDS = ("minutes", "planned", "created_at", "starts_at", "ends_at", "stopped_at", "source")
 DEFAULT_LAUNCH_WINDOW = {
     "enabled": False, "days": [1, 2, 3, 4, 5], "start": "15:00", "end": "17:30",
@@ -49,17 +46,6 @@ DEFAULT_SETTINGS = {
 }
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS items (
-    id INTEGER PRIMARY KEY,
-    list TEXT NOT NULL,
-    title TEXT NOT NULL,
-    estimate_min INTEGER,
-    due TEXT,
-    priority INTEGER NOT NULL DEFAULT 0,
-    notes TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    done_at INTEGER
-);
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY,
     minutes INTEGER NOT NULL,
@@ -81,10 +67,6 @@ CREATE TABLE IF NOT EXISTS kv (
 """
 
 MIGRATIONS = {
-    "items": [
-        ("uid", "TEXT"), ("updated_at", "INTEGER NOT NULL DEFAULT 0"),
-        ("deleted", "INTEGER NOT NULL DEFAULT 0"), ("rev", "INTEGER NOT NULL DEFAULT 0"),
-    ],
     "sessions": [
         ("uid", "TEXT"), ("planned", "INTEGER"), ("created_at", "INTEGER"), ("source", "TEXT NOT NULL DEFAULT 'manual'"),
         ("updated_at", "INTEGER NOT NULL DEFAULT 0"), ("deleted", "INTEGER NOT NULL DEFAULT 0"),
@@ -136,13 +118,11 @@ class Store:
             for name, decl in cols:
                 if name not in have:
                     self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
-        for table in ("items", "sessions"):
-            for r in self.db.execute(f"SELECT id FROM {table} WHERE uid IS NULL").fetchall():
-                self.db.execute(f"UPDATE {table} SET uid=?, updated_at=?, rev=? WHERE id=?",
-                                (new_uid(), now_ms(), self.next_rev(), r["id"]))
+        for r in self.db.execute("SELECT id FROM sessions WHERE uid IS NULL").fetchall():
+            self.db.execute("UPDATE sessions SET uid=?, updated_at=?, rev=? WHERE id=?",
+                            (new_uid(), now_ms(), self.next_rev(), r["id"]))
         self.db.execute("UPDATE sessions SET planned=minutes WHERE planned IS NULL")
         self.db.execute("UPDATE sessions SET created_at=started_at WHERE created_at IS NULL")
-        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS items_uid ON items(uid)")
         self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS sessions_uid ON sessions(uid)")
 
     def next_rev(self):
@@ -167,38 +147,6 @@ class Store:
 
 
 # ---------------------------------------------------------------- validation
-
-
-def clean_item(body, partial):
-    out = {}
-    for key in ITEM_FIELDS + ("done",):
-        if key not in body:
-            continue
-        val = body[key]
-        if key == "title":
-            val = str(val or "").strip()
-            if not val:
-                raise ApiError(400, "title is required")
-            val = val[:500]
-        elif key == "estimate_min":
-            val = None if val in (None, "") else max(0, int(val))
-        elif key == "due":
-            val = None if not val else str(val)[:10]
-        elif key == "priority":
-            val = min(3, max(0, int(val or 0)))
-        elif key == "notes":
-            val = str(val or "")[:20000]
-        elif key == "list":
-            if val not in LISTS:
-                raise ApiError(400, "bad list")
-        elif key in ("created_at", "done_at"):
-            val = None if val in (None, "") else int(val)
-        elif key == "done":
-            key, val = "done_at", (now() if val else None)
-        out[key] = val
-    if not partial and "title" not in out:
-        raise ApiError(400, "title is required")
-    return out
 
 
 def clean_session(body):
@@ -343,60 +291,12 @@ class App:
     # ---- serialisation
 
     @staticmethod
-    def item_out(r):
-        return {
-            "id": r["uid"], "list": r["list"], "title": r["title"], "estimate_min": r["estimate_min"],
-            "due": r["due"], "priority": r["priority"], "notes": r["notes"], "created_at": r["created_at"],
-            "done_at": r["done_at"], "updated_at": r["updated_at"], "deleted": bool(r["deleted"]),
-        }
-
-    @staticmethod
     def session_out(r):
         return {
             "id": r["uid"], "minutes": r["minutes"], "planned": r["planned"], "created_at": r["created_at"],
             "starts_at": r["started_at"], "ends_at": r["ends_at"], "stopped_at": r["stopped_at"],
             "source": r["source"], "updated_at": r["updated_at"], "deleted": bool(r["deleted"]),
         }
-
-    # ---- items
-
-    def items(self):
-        return [self.item_out(r) for r in self.s.q("SELECT * FROM items WHERE deleted=0 ORDER BY id")]
-
-    def get_item(self, uid):
-        rows = self.s.q("SELECT * FROM items WHERE uid=?", (uid,))
-        if not rows:
-            raise ApiError(404, "no such item")
-        return rows[0]
-
-    def create_item(self, body):
-        f = clean_item(body, partial=False)
-        f.setdefault("list", "need")
-        f.setdefault("created_at", now())
-        if f["list"] == "want":
-            f["due"] = None
-        uid = str(body.get("id") or new_uid())[:40]
-        with self.s.lock:
-            if self.s.q("SELECT 1 FROM items WHERE uid=?", (uid,)):
-                raise ApiError(409, "item exists")
-            f.update(uid=uid, updated_at=now_ms(), rev=self.s.next_rev())
-            self.s.x(f"INSERT INTO items ({', '.join(f)}) VALUES ({', '.join('?' for _ in f)})", list(f.values()))
-            return self.item_out(self.get_item(uid))
-
-    def update_item(self, uid, body):
-        f = clean_item(body, partial=True)
-        if f.get("list") == "want":
-            f["due"] = None
-        with self.s.lock:
-            self.get_item(uid)
-            f.update(updated_at=now_ms(), rev=self.s.next_rev())
-            self.s.x(f"UPDATE items SET {', '.join(f'{k}=?' for k in f)} WHERE uid=?", [*f.values(), uid])
-            return self.item_out(self.get_item(uid))
-
-    def delete_item(self, uid):
-        with self.s.lock:
-            self.s.x("UPDATE items SET deleted=1, updated_at=?, rev=? WHERE uid=?", (now_ms(), self.s.next_rev(), uid))
-        return {"ok": True}
 
     # ---- settings
 
@@ -677,8 +577,6 @@ class App:
         except (TypeError, ValueError):
             raise ApiError(400, "bad since")
         with self.s.lock:
-            for it in body.get("items") or []:
-                self.merge_item(it)
             for se in body.get("sessions") or []:
                 self.merge_session(se)
             st = body.get("settings")
@@ -688,7 +586,6 @@ class App:
                     self.put_settings(st["value"], int(st["updated_at"]))
             out = {
                 "rev": self.s.rev(), "now": now(),
-                "items": [self.item_out(r) for r in self.s.q("SELECT * FROM items WHERE rev > ?", (since,))],
                 "sessions": [self.session_out(r) for r in self.s.q("SELECT * FROM sessions WHERE rev > ?", (since,))],
                 "enforcers": [
                     {**e, "status": json.loads(e["status"]), "age": now() - e["last_seen"]}
@@ -699,27 +596,6 @@ class App:
             if row:
                 out["settings"] = {"value": json.loads(row[0]["value"]), "updated_at": row[0]["updated_at"]}
         return out
-
-    def merge_item(self, it):
-        uid = str(it.get("id") or "")[:40]
-        if not uid:
-            return
-        incoming_at = int(it.get("updated_at") or 0)
-        cur = self.s.q("SELECT updated_at FROM items WHERE uid=?", (uid,))
-        if cur and cur[0]["updated_at"] >= incoming_at:
-            return
-        try:
-            f = clean_item(it, partial=bool(cur))
-        except ApiError:
-            return
-        f.setdefault("created_at", now())
-        f.update(updated_at=incoming_at, deleted=1 if it.get("deleted") else 0, rev=self.s.next_rev())
-        if cur:
-            self.s.x(f"UPDATE items SET {', '.join(f'{k}=?' for k in f)} WHERE uid=?", [*f.values(), uid])
-        else:
-            f.setdefault("list", "need")
-            f["uid"] = uid
-            self.s.x(f"INSERT INTO items ({', '.join(f)}) VALUES ({', '.join('?' for _ in f)})", list(f.values()))
 
     def merge_session(self, se):
         uid = str(se.get("id") or "")[:40]
@@ -813,16 +689,6 @@ def make_handler(app):
                     raise ApiError(405, "method not allowed")
                 return self.static(path)
             r, m = parts[1:], method
-            if r == ["items"]:
-                if m == "GET":
-                    return app.items()
-                if m == "POST":
-                    return app.create_item(self.body())
-            if len(r) == 2 and r[0] == "items":
-                if m == "PATCH":
-                    return app.update_item(r[1], self.body())
-                if m == "DELETE":
-                    return app.delete_item(r[1])
             if r == ["ignite"]:
                 if m == "GET":
                     return app.ignite_state()

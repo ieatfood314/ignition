@@ -87,10 +87,6 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_ignite" />
         </receiver>
-        <receiver android:name=".NextUpWidget" android:exported="false" android:label="@string/widget_next">
-            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
-            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_next" />
-        </receiver>
         <receiver android:name=".BurnWidget" android:exported="false" android:label="@string/widget_burn">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_burn" />

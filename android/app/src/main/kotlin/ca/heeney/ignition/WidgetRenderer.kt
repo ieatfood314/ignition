@@ -6,11 +6,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.text.TextPaint
-import android.text.TextUtils
 import org.json.JSONObject
 import java.io.File
-import java.time.LocalDate
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
@@ -105,61 +102,6 @@ class WidgetRenderer(context: Context) {
         }
     }
 
-    // ---------------------------------------------------------------- next up (2x2)
-
-    fun nextUp(widthDp: Float, heightDp: Float, items: List<JSONObject>, openCount: Int): Layers {
-        val f = Frame(widthDp, heightDp)
-        val k = (widthDp / 150f).coerceIn(0.75f, 1.4f)
-        val pad = dp(PAD * k)
-        val x0 = pad
-        val x1 = f.w - pad
-        var y = pad
-        val head = text(ndotCaps, dp(10f * k), 1f)
-        val count = text(mono, dp(8f * k), SECONDARY)
-        f.r.drawCircle(x0 + dp(2.5f * k), y + dp(5f * k), dp(2.5f * k), fill(1f))
-        f.m.drawText("NEXT UP", x0 + dp(10f * k), y - head.ascent(), head)
-        if (openCount > 0) {
-            val c = "$openCount"
-            f.m.drawText(c, x1 - count.measureText(c), y - head.ascent(), count)
-        }
-        y += dp(10f * k) + dp(9f * k)
-
-        val title = text(monoMedium, dp(9.5f * k), 1f)
-        val meta = text(mono, dp(7.5f * k), SECONDARY)
-        val rowH = dp(9.5f * k) + dp(3f * k) + dp(7.5f * k) + dp(8f * k)
-        if (items.isEmpty()) {
-            f.m.drawText("ALL CLEAR.", x0, y - title.ascent(), title)
-            f.m.drawText("NOTHING DUE.", x0, y + dp(14f * k) - meta.ascent(), meta)
-            return f.layers()
-        }
-        for (it in items) {
-            if (y + rowH - dp(8f * k) > f.h - pad + dp(2f)) break
-            f.m.drawText(clip(it.optString("title"), x1 - x0, title), x0, y - title.ascent(), title)
-            val my = y + dp(9.5f * k) + dp(3f * k) - meta.ascent()
-            var mx = x0
-            val pri = it.optInt("priority")
-            if (pri > 0) {
-                for (b in 0 until 3) {
-                    val on = b < pri
-                    (if (on) f.r else f.m).drawRect(mx, my - dp(6f * k), mx + dp(1.6f * k), my, fill(if (on) 1f else DIM))
-                    mx += dp(3f * k)
-                }
-                mx += dp(4f * k)
-            }
-            val est = it.intOrNull("estimate_min")?.let { m -> estimate(m) }
-            if (est != null) {
-                f.m.drawText(est, mx, my, meta)
-                mx += meta.measureText(est) + dp(7f * k)
-            }
-            it.stringOrNull("due")?.let { due ->
-                val (label, hot) = dueLabel(due)
-                (if (hot) f.r else f.m).drawText(label, mx, my, if (hot) text(mono, dp(7.5f * k), 1f) else meta)
-            }
-            y += rowH
-        }
-        return f.layers()
-    }
-
     // ---------------------------------------------------------------- burn goals (2x1)
 
     fun burn(widthDp: Float, heightDp: Float, stats: JSONObject): Layers {
@@ -217,31 +159,12 @@ class WidgetRenderer(context: Context) {
         return out
     }
 
-    private fun estimate(min: Int) = if (min < 60) "${min}M" else if (min % 60 == 0) "${min / 60}H" else "${min / 60}H${min % 60}M"
-
     private fun duration(sec: Long): String {
         val m = sec / 60
         return if (m < 60) "${m}M" else if (m % 60 == 0L) "${m / 60}H" else "${m / 60}H${m % 60}"
     }
 
-    private fun dueLabel(due: String): Pair<String, Boolean> {
-        val d = runCatching { LocalDate.parse(due) }.getOrNull() ?: return due to false
-        val diff = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), d)
-        val label = when {
-            diff < -1 -> "${-diff}D LATE"
-            diff == -1L -> "YESTERDAY"
-            diff == 0L -> "TODAY"
-            diff == 1L -> "TOMORROW"
-            diff < 7 -> d.dayOfWeek.name.take(3)
-            else -> "${d.month.name.take(3)} ${d.dayOfMonth}"
-        }
-        return label to (diff <= 0)
-    }
-
     private fun centered(c: Canvas, s: String, cx: Float, baseline: Float, p: Paint) = c.drawText(s, cx - p.measureText(s) / 2f, baseline, p)
-
-    private fun clip(s: String, room: Float, p: Paint) =
-        TextUtils.ellipsize(s, TextPaint(p), max(room, 0f), TextUtils.TruncateAt.END).toString()
 
     private fun text(font: Typeface, size: Float, alpha: Float) = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         typeface = font

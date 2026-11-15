@@ -1,6 +1,5 @@
 package ca.heeney.ignition
 
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -31,15 +30,9 @@ class SyncTest {
 
     private fun phone(): Store = Store.open(File.createTempFile("phone", ".json").also { it.delete() }).also { it.serverUrl = server }
 
-    private fun serverItems(): Map<String, JSONObject> {
-        val arr = JSONArray(http("GET", "/api/items"))
-        return (0 until arr.length()).map { arr.getJSONObject(it) }.associateBy { it.getString("id") }
-    }
-
     @Test
     fun fullRoundTrip() {
-        // Server already has data and settings (as on the NAS).
-        val web = JSONObject(http("POST", "/api/items", JSONObject().put("title", "From the web").put("priority", 2)))
+        // Server already has settings (as on the NAS).
         http("PUT", "/api/settings", JSONObject().put("goals", JSONObject().put("daily", 120).put("weekly", 600)))
 
         // A fresh phone pulls everything and must not clobber the server's settings with its defaults.
@@ -47,31 +40,8 @@ class SyncTest {
         val (err, changed) = Sync.runWith(a)
         assertNull(err)
         assertTrue(changed)
-        assertEquals("From the web", a.items[web.getString("id")]!!.getString("title"))
         assertEquals(120, a.settings.getJSONObject("goals").getInt("daily"))
         assertEquals(120, JSONObject(http("GET", "/api/settings")).getJSONObject("goals").getInt("daily"))
-
-        // Phone adds, edits and deletes; the server sees all of it.
-        a.putItem(JSONObject().put("id", "phone-1").put("list", "want").put("title", "From the phone").put("priority", 1)
-            .put("created_at", Logic.now()).put("due", JSONObject.NULL).put("estimate_min", 30).put("notes", "").put("done_at", JSONObject.NULL).put("deleted", false))
-        a.putItem(JSONObject(a.items[web.getString("id")].toString()).put("title", "Edited on phone"))
-        assertNull(Sync.runWith(a).first)
-        assertTrue(a.dirtyItems.isEmpty())
-        var items = serverItems()
-        assertEquals("From the phone", items["phone-1"]!!.getString("title"))
-        assertEquals("Edited on phone", items[web.getString("id")]!!.getString("title"))
-        a.putItem(JSONObject(a.items["phone-1"].toString()).put("deleted", true))
-        assertNull(Sync.runWith(a).first)
-        items = serverItems()
-        assertFalse("phone-1" in items)
-
-        // A newer web edit wins over the phone's copy.
-        Thread.sleep(5)
-        val newer = JSONObject(a.items[web.getString("id")].toString()).put("title", "Edited on web again")
-            .put("updated_at", System.currentTimeMillis() + 1000)
-        http("POST", "/api/sync", JSONObject().put("since", 0).put("items", JSONArray().put(newer)))
-        assertNull(Sync.runWith(a).first)
-        assertEquals("Edited on web again", a.items[web.getString("id")]!!.getString("title"))
 
         // Igniting on the phone reaches the server (and so the enforcers).
         a.putSession(Logic.newSession("phone-burn", 25, Logic.now(), "manual"))
@@ -88,7 +58,7 @@ class SyncTest {
         // A second phone converges on the same data; a repeat sync changes nothing.
         val b = phone()
         assertNull(Sync.runWith(b).first)
-        assertEquals(a.items.keys, b.items.keys)
+        assertEquals(a.sessions.keys, b.sessions.keys)
         assertEquals("burning", Logic.current(b).phase)
         assertFalse(Sync.runWith(b).second)
         assertTrue(b.enforcers.length() >= 0)
