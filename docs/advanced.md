@@ -13,6 +13,9 @@ There are two independent halves that share a sync protocol.
 
 ```
 server/ignition.py              web app + JSON API + SQLite + launch scheduler (user service)
+server/screen/                  screen time and limits: the record (core), the limit rules (limits),
+                                their endpoints (hub), and the Plasma tracker (tracker)
+tracker/                        installs the tracker as a user service on KDE Plasma computers
 web/                            the frontend (also bundled into the Android app)
 enforcer/ignition-enforcer.py   root daemon on each computer that applies the blocks
 enforcer/openrgb-ram            optional burn/idle RGB hook
@@ -28,7 +31,8 @@ android/                        the Android app (Kotlin, no dependencies)
 `install.sh` runs as your user and does three things:
 
 1. Installs the server as a `systemd --user` service (`ignition.service`) on `127.0.0.1:4580`. Its data
-   lives in `~/.local/share/ignition/ignition.db`.
+   lives in `~/.local/share/ignition/ignition.db`, and screen time and limits in `ignition.screen.db` beside
+   it. On KDE Plasma it also installs the screen-time tracker (`ignition-tracker.service`).
 2. Runs `sudo enforcer/install.sh`, pointing the enforcer at that server. Skip this with `--no-blocker`.
 3. If Tailscale is installed, shares the server on the tailnet at `http://<machine>:8445` with Tailscale
    Serve. This is plain HTTP, tailnet only. If Tailscale refuses, run
@@ -163,6 +167,47 @@ cleanly lifts everything and resumes what it paused:
 sudo systemctl stop ignition-enforcer
 ```
 
+## Screen time and limits
+
+Every device sends the server **spans**: from when to when an app (and, in a browser, which site) was in
+front. The server keeps them in `ignition.screen.db`, names and sorts them into six kinds (make, talk, other,
+browse, watch, play), and counts time on two devices at once only once. Days run from 04:00 to 04:00.
+
+- **Phones** read Android's usage log (it needs *usage access*) and send it every few minutes; the blocker
+  notes which site each browser shows. Nothing is sent without a server.
+- **KDE Plasma computers** run `ignition-tracker`, a user service with a small KWin script that says which
+  window has focus. It keeps the window's class and, for browsers, the site at the end of the title, never the
+  title itself. It stores spans locally first, so nothing is lost while the server is out of reach. It runs as
+  you, so stopping it stops that computer's time from counting (limits already closed still block).
+
+**Limits** live on the server, which evaluates them over every device's time. A rule is one of `day`
+(minutes a day), `every` (minutes in any N hours), `block` (closed between two times; the same time at both
+ends is all day), `window` (minutes between two times) or `stretch` (minutes in a row, then a rest). The same
+rules are in `server/screen/limits.py` and the app's `Limits.kt`. Loosening a limit or its settings waits
+`changes_wait` minutes; tightening is immediate.
+
+Each device keeps the limits itself:
+
+- **Computers:** the enforcer's heartbeat reply carries `limit_block`: the sites, program names and whether
+  games count, for every limit closed right now. It blocks them like a burn's (hosts file; programs paused if
+  they were already running when the limit closed, killed if started after), and keeps the last answer until
+  each limit's own reopening time if the server goes away. *Play* also catches any process run through
+  Wine/Proton (an `.exe`) or with a Steam app id.
+- **Phone:** fetches the limits, with the apps and sites each covers and other devices' recent time on it,
+  and evaluates them against its own usage log, so they hold offline too. A closed app or site brings up
+  the Limits page. While limits are on (and the setting *Lock ignition's settings on the phone* is), or a burn
+  is, the blocker sends you home from ignition's App info, its accessibility and usage-access pages, the
+  uninstall dialog and the Date & time page. That lock lifts by itself if the server hasn't been heard from in
+  three days.
+
+**Unlocks** are kept by the server, so one counts against the day's allowance everywhere and opens the limit
+everywhere. The wait is timed by the server, and there are none during a burn.
+
+**From lightcurve:** the server brings in `~/.local/share/lightcurve/hub.db` the first time its default
+database starts (`--import-lightcurve PATH` does it by hand, safe to repeat). The tracker copies lightcurve's
+tracker database and device id and switches off `lightcurve-tracker.service`. The phone app takes over the
+phone's lightcurve device by its model name. Once it has, the server tells the old app there are no limits.
+
 ## KDE Plasma widgets
 
 Two widgets for Plasma 6, in the same Nothing-style dot-matrix as the Android ones. Each works on the desktop
@@ -185,8 +230,10 @@ a plain monospace otherwise. Plasma loads updated widgets when it restarts:
 
 ## Android app
 
-- **The blocker** is an accessibility service (Settings → Phone → *App & site blocker*). It only reads the
-  foreground app and, in browsers, the address bar. Nothing is logged or leaves the phone. Any app that
+- **The blocker** is an accessibility service (Settings → Phone → *App & site blocker*). It reads the
+  foreground app, a browser's address bar and the few Settings pages it guards (see
+  [Screen time and limits](#screen-time-and-limits)). The only thing it keeps is which site a browser showed,
+  for screen time, and that goes only to your server. Any app that
   opens web links counts as a browser. Firefox and its forks, Chromium browsers (Chrome, Brave, Edge,
   Vivaldi...), Samsung Internet, DuckDuckGo and Opera are read by their address bar's id; anything else
   falls back to the first filled-in text field outside a list. **Every game** catches anything Android
@@ -251,11 +298,21 @@ The UI is `../web`, bundled as assets. The app answers the same `/api/...` calls
 IGNITION_TEST_SERVER=http://127.0.0.1:4597 gradle testDebugUnitTest
 ```
 
+The server's screen-time and limit rules have their own tests: `python3 -m unittest discover -s tests -t .`.
+
 ## API
 
 `GET /api/ignite`, `POST /api/ignite` (`minutes`,
 `delay`), `POST /api/ignite/{stop,scrub,now,extend,skip}`, `GET/PUT /api/settings` (goals, schedules,
 block, launch_window, end_early_over), `GET /api/stats`, `GET /api/burns` (every burn, for the Stats page), `POST /api/sync`, `GET /api/ping`,
 `POST /api/enforcer/heartbeat`.
+
+Screen time: `POST /api/ingest` (a device's spans), `GET /api/day` (`date`, `device`), `GET /api/range`
+(`days`, `end`), `GET /api/{summary,apps,sites,things}`, `GET /api/screen/today`, `GET /api/devices`,
+`PATCH /api/devices/<id>` (`name`, `kind`), `PUT /api/category` (`key`, `cat`).
+
+Limits: `GET /api/limits` (`device` adds what that device needs to keep them), `PUT /api/limits` (`dry` to
+ask whether it would wait), `DELETE /api/limits/<id>`, `POST /api/limits/<id>/cancel`, `PUT /api/limits/settings`,
+`POST /api/limits/<id>/unlock` (`step`: `start`, `open` or `cancel`), `GET /api/limits/enforce`.
 
 There's no authentication. Keep the server on localhost and your tailnet, which is what the installer does.

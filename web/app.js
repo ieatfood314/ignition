@@ -28,10 +28,24 @@ const stamp = (data, sent) => {
   return data;
 };
 
+// In the app, screen time and limits come from the server: the app fetches them off the page's thread
+// and answers through ignitionReply.
+const REMOTE = /^\/api\/(day|range|devices|summary|apps|sites|things|screen|limits|category)(\/|\?|$)/;
+const replies = new Map();
+let replyId = 0;
+window.ignitionReply = (id, text) => {
+  const done = replies.get(id);
+  replies.delete(id);
+  if (done) done(JSON.parse(text));
+};
+
 async function api(method, path, body) {
   const sent = Date.now() / 1000;
   if (NATIVE) {
-    const res = JSON.parse(NATIVE.request(method, path, body ? JSON.stringify(body) : ""));
+    const remote = REMOTE.test(path) && NATIVE.requestAsync;
+    const res = remote
+      ? await new Promise((resolve) => { const id = ++replyId; replies.set(id, resolve); NATIVE.requestAsync(id, method, path, body ? JSON.stringify(body) : ""); })
+      : JSON.parse(NATIVE.request(method, path, body ? JSON.stringify(body) : ""));
     if (res.status >= 400) throw new Error((res.body && res.body.error) || `Error ${res.status}`);
     return stamp(res.body, sent);
   }
@@ -979,10 +993,10 @@ function paintSummaries() {
   if (appInfo) {
     const bl = appInfo.blocker.enabled;
     lamp("blocker", bl ? "on" : "warn");
-    const missing = [!appInfo.notifications.granted && "notifications"].filter(Boolean);
+    const missing = [!appInfo.notifications.granted && "notifications", appInfo.usage && !appInfo.usage.granted && "usage"].filter(Boolean);
     pill("phone", bl && !missing.length ? "OK" : "Fix", bl && !missing.length ? "on" : "warn");
     const extras = [appInfo.ring.enabled && "rings at liftoff", appInfo.dnd.enabled && "Do Not Disturb"].filter(Boolean);
-    tile("phone", bl ? (missing.length ? "Notifications off" : "All set") : "Blocker is off",
+    tile("phone", bl ? (missing.includes("usage") ? "Screen time off" : missing.length ? "Notifications off" : "All set") : "Blocker is off",
       bl ? esc(extras.join(" · ") || "Blocker on") : `<b class="warn">Apps and sites won't be blocked here</b>`);
 
     const link = syncState();
@@ -1133,8 +1147,13 @@ async function loadAppInfo() {
     $("#blocker-btn").textContent = bl.enabled ? "On" : "Turn on";
     $("#blocker-btn").disabled = !!bl.enabled;
     $("#blocker-state").textContent = bl.enabled
-      ? "watching for blocked apps and sites during burns"
+      ? "blocks during burns and when a limit is closed"
       : "needs accessibility access to see which app or site is open";
+    const us = appInfo.usage || {};
+    lamp("usage", us.granted ? "on" : "warn");
+    $("#usage-btn").textContent = us.granted ? "On" : "Turn on";
+    $("#usage-btn").disabled = !!us.granted;
+    $("#usage-state").textContent = us.granted ? "counts this phone's screen time" : "needs usage access to count screen time";
     $("#blocker-hint").hidden = !!bl.enabled;
     $("#blocker-hint").textContent = "The blocker is off on this phone, so apps and sites won't be blocked here. Turn it on in Settings › Phone.";
     $("#ring-toggle").checked = !!appInfo.ring.enabled;
@@ -1236,6 +1255,7 @@ $$("#ring-sound [data-sound]").forEach((b) => b.onclick = async () => {
 });
 $("#ring-test").onclick = async () => { try { await api("POST", "/native/app/ring-test"); } catch (e) { toast(e.message); } };
 $("#blocker-btn").onclick = async () => { try { appInfo = await api("POST", "/native/app/blocker"); } catch (e) { toast(e.message); } loadAppInfo(); };
+$("#usage-btn").onclick = async () => { try { await api("POST", "/native/app/usage"); } catch (e) { toast(e.message); } };
 $("#notif-btn").onclick = async () => { try { await api("POST", "/native/app/notifications"); } catch (e) { toast(e.message); } };
 
 /* ---------------- main engine cutoff ---------------- */
@@ -1525,7 +1545,7 @@ window.addEventListener("scroll", hideTip, { passive: true });
 
 /* ---------------- routing & lifecycle ---------------- */
 
-const TABS = ["ignite", "stats"];
+const TABS = ["ignite", "screen", "limits", "stats"];
 
 /** The little bar under (or over, on a phone) the open tab, sliding across when you switch. */
 function moveTabInd() {
@@ -1569,6 +1589,7 @@ function route() {
     goSettings(settingsSub());
   }
   if (page === "stats") { renderStats(); loadBurns(); }
+  if (window.screenPage && (was !== page || page === "settings")) window.screenPage(page);
 }
 
 // Hooks for the Android app.
@@ -1576,9 +1597,12 @@ window.ignitionRefresh = () => {
   loadIgnite(); loadSettings();
   if (state.page === "settings" && NATIVE) loadAppInfo();
   if (state.page === "stats") loadBurns();
+  if (window.screenRefresh) window.screenRefresh();
 };
 window.ignitionBack = () => {
   if (mecoDialog.open) { mecoDialog.close(); return true; }
+  const sheet = $("dialog.sheet[open]");
+  if (sheet) { sheet.close(); return true; }
   if (state.page === "settings") { settingsBack(); return true; }
   if (state.page !== "ignite") { location.hash = "ignite"; return true; }
   return false;
@@ -1586,16 +1610,17 @@ window.ignitionBack = () => {
 
 window.addEventListener("hashchange", route);
 document.addEventListener("keydown", (e) => {
-  if (mecoDialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
-  if (e.key === "1") location.hash = "ignite";
-  if (e.key === "2") location.hash = "stats";
+  if ($("dialog[open]") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+  const tab = TABS[Number(e.key) - 1];
+  if (tab) location.hash = tab;
   if (e.key === ",") location.hash = "settings";
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { flushSettings(); return; }
   loadIgnite(); loadSettings();
   if (state.page === "stats") loadBurns();
+  if (window.screenRefresh) window.screenRefresh();
 });
 
 route();

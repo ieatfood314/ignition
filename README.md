@@ -6,8 +6,10 @@
 
 # ignition
 
-**A focus timer you can't cheat.** Turn the dial to how long, tap the middle, and the apps, websites and programs
-that eat your day are blocked until the timer runs out, on your phone and your computers at once.
+**A focus timer you can't cheat, and limits you can't talk your way past.** Turn the dial to how long, tap the
+middle, and the apps, websites and programs that eat your day are blocked until the timer runs out, on your
+phone and your computers at once. Between burns, ignition counts your screen time on every device and keeps
+the limits you set, like "no games before 6 pm" or "an hour of video a day".
 
 Most screen-time tools fail the same way: the block is one tap from gone. A "skip for today", a PIN you set
 yourself, a toggle in Settings. The moment you actually want to cave, you can, and that's the only moment
@@ -125,6 +127,34 @@ Settings also has **burn goals** (daily and weekly targets), **scheduled launche
 own at set times, and a **launch window**, where your phone nudges you to start a burn if you've been home a
 while and haven't.
 
+## Screen time and limits
+
+These need a server (a Linux computer running ignition), because they count every device together.
+
+**Screen** shows where today went: an hour-by-hour chart in six kinds (make, talk, other, browse, watch,
+play), each device's own strip, your burns over the top, and every app and site. *Weeks* and *Apps* look
+further back. Tap an app to change which kind it counts as. Phones count through Android's own usage log
+(allow *Screen time* under ⚙ → This phone); KDE Plasma computers count through a small tracker the
+installer adds.
+
+**Limits** close something when its time is up, on every device at once. A limit covers apps, sites or a
+whole kind (*Play* covers every game, including ones you install later), with any mix of rules:
+
+- **a day's allowance**: so many minutes a day (days start at 4 am);
+- **a rolling allowance**: so many minutes in any few hours;
+- **closed hours**: say 10 pm to 7 am, or all day;
+- **within hours**: so many minutes between two times;
+- **a break**: after so many minutes in a row, a rest before it opens again.
+
+What a limit has closed can be **unlocked**, if you let it: hold a button, wait (a few minutes, or hours),
+and it opens for a set time, with so many unlocks a day. An unlock counts everywhere and opens it
+everywhere. There are no unlocks during a burn.
+
+Making a limit stricter happens at once. Loosening one (or deleting it) waits, 15 minutes by default, so the
+change you make in a weak moment isn't there when you want it. While limits are on, the phone also guards
+the switches that would turn ignition off: its accessibility and usage access settings, uninstalling it,
+and the clock.
+
 ## What it blocks
 
 | | On your phone | On your computers |
@@ -134,11 +164,22 @@ while and haven't.
 
 You set it once in **⚙ → Blocking**. With sync on, it applies everywhere.
 
+A closed **limit** blocks the same way, outside burns too. On the phone, the Limits page takes the screen
+and says when it opens. On computers, sites are blocked and programs closed (or paused, if they were open
+when the limit closed), and games running through Steam, Proton or Wine count as *Play* whatever they're
+called.
+
 ## Questions
 
-**Does anything get sent anywhere?** No. There's no account and no cloud. The phone blocker only looks at
-which app is open and, in browsers, the address bar. Nothing is logged and nothing leaves the phone. If you
-turn on sync, your devices talk only to each other, over Tailscale.
+**Does anything get sent anywhere?** Only to your own server, if you set one up. There's no account and no
+cloud. Without a server the phone keeps everything to itself. With one, your devices talk only to each other,
+over Tailscale, and screen time sends which app was in front when, and which site (the domain, never the
+address) a browser showed. Window titles and page contents are never read.
+
+**Moving from lightcurve?** Ignition took it in. The first time the server starts after the update it brings
+in lightcurve's record, limits and settings, the Plasma tracker switches itself over, and the phone app
+carries on as the same device. Once ignition's app has fetched the limits, the old lightcurve app is told
+there are none, so you can uninstall it.
 
 **I really, genuinely need out of a burn.** Ignition is for self-control, not security. The only person it
 guards against is you. On a computer, `sudo systemctl stop ignition-enforcer` lifts every block on it.

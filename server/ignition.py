@@ -9,6 +9,7 @@ Times are unix seconds except updated_at.
 """
 
 import argparse
+import gzip
 import hashlib
 import json
 import mimetypes
@@ -16,12 +17,16 @@ import os
 import re
 import secrets
 import sqlite3
+import sys
 import threading
 import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # for screen/, also under python3 -I
+from screen.hub import Screen, default_lightcurve_db  # noqa: E402
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 END_EARLY_OVER = 60  # default for settings.end_early_over: burns longer than this many minutes can be ended early
@@ -287,6 +292,7 @@ def schedule_uid(sched_id, ymd):
 class App:
     def __init__(self, store):
         self.s = store
+        self.screen = None  # screen time and limits (a Screen), once main() opens its database
 
     # ---- serialisation
 
@@ -567,7 +573,11 @@ class App:
             (host, now(), status),
         )
         block = self.settings()[0]["block"]
-        return {**self.ignite_state(), "block": {"sites": block["sites"], "programs": block["programs"]}}
+        out = {**self.ignite_state(), "block": {"sites": block["sites"], "programs": block["programs"]}}
+        if self.screen:
+            # Limits hold on computers too: what's over its limit right now, burn or not.
+            out["limit_block"] = self.screen.enforce()
+        return out
 
     # ---- sync (Android app)
 
@@ -675,10 +685,18 @@ def make_handler(app):
             n = int(self.headers.get("Content-Length") or 0)
             if not n:
                 return {}
+            if n > 64 * 1024 * 1024:
+                raise ApiError(413, "too large")
+            raw = self.rfile.read(n)
             try:
-                return json.loads(self.rfile.read(n))
-            except json.JSONDecodeError:
+                if self.headers.get("Content-Encoding") == "gzip":  # trackers compress what they send
+                    raw = gzip.decompress(raw)
+                data = json.loads(raw)
+            except (OSError, ValueError):
                 raise ApiError(400, "bad json")
+            if not isinstance(data, dict):
+                raise ApiError(400, "expected a JSON object")
+            return data
 
         def route(self, method):
             url = urlparse(self.path)
@@ -713,9 +731,17 @@ def make_handler(app):
             if r == ["sync"] and m == "POST":
                 return app.sync(self.body())
             if r == ["ping"] and m == "GET":
-                return {"ignition": True, "now": now(), "rev": app.s.rev()}
+                # "name" is what lightcurve's trackers and phone app look for: this answers for both.
+                return {"ignition": True, "now": now(), "rev": app.s.rev(), "name": "lightcurve", "screen": True}
             if r == ["enforcer", "heartbeat"] and m == "POST":
                 return app.heartbeat(self.body())
+            if app.screen:
+                try:
+                    out = app.screen.route(m, r, parse_qs(url.query), self.body)
+                except ValueError as e:
+                    raise ApiError(400, str(e))
+                if out is not None:
+                    return out
             raise ApiError(404, "not found")
 
         def static(self, path):
@@ -764,11 +790,18 @@ def make_handler(app):
 
 
 def scheduler(app):
+    n = 0
     while True:
         try:
             app.run_schedules()
         except Exception as e:  # noqa: BLE001
             print(f"schedule check failed: {e}", flush=True)
+        n += 1
+        if app.screen and n % 40 == 0:  # every ten minutes
+            try:
+                app.screen.checkpoint()
+            except Exception as e:  # noqa: BLE001
+                print(f"screen checkpoint failed: {e}", flush=True)
         time.sleep(15)
 
 
@@ -781,8 +814,18 @@ def main():
         type=Path,
         default=Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "ignition/ignition.db",
     )
+    p.add_argument("--screen-db", type=Path, help="screen time and limits; defaults to <db>.screen.db beside --db")
+    p.add_argument("--import-lightcurve", type=Path, metavar="HUB_DB",
+                   help="bring in a lightcurve hub's record (safe to repeat); done by itself the first time "
+                        "the default database starts, from ~/.local/share/lightcurve/hub.db")
     a = p.parse_args()
     app = App(Store(a.db))
+    screen_db = a.screen_db or a.db.with_name(a.db.stem + ".screen.db")
+    first = not screen_db.exists()
+    app.screen = Screen(screen_db, app)
+    src = a.import_lightcurve or (default_lightcurve_db() if first and a.db == p.get_default("db") else None)
+    if src:
+        print(f"brought in {app.screen.import_lightcurve(src)} rows from lightcurve ({src})", flush=True)
     threading.Thread(target=scheduler, args=(app,), daemon=True).start()
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(app))
     print(f"ignition on http://{a.host}:{a.port} db={a.db}", flush=True)

@@ -49,6 +49,7 @@ object Sync {
     /** One sync round. Returns an error message, or null on success (or when sync is off). Blocking. */
     fun run(context: Context): String? {
         val (error, changed) = runWith(Store.get(context))
+        if (error == null) ScreenSync.kick(context)
         if (changed) Reactor.update(context)
         if (changed || error != null) UiBus.changed()
         return error

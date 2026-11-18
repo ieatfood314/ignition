@@ -129,10 +129,13 @@ if [ -z "$join" ] && command -v tailscale >/dev/null; then
 fi
 
 # ---- widgets for the KDE Plasma desktop, if this is one
-widgets=
+widgets= tracker=
 if command -v kpackagetool6 >/dev/null; then
     if sh "$here/plasma/install.sh" --server "${join:-http://127.0.0.1:$port}" >/dev/null; then widgets=1
     else say "Couldn't add the KDE Plasma widgets."; fi
+    # and the screen-time tracker, which records which window is in front
+    if sh "$here/tracker/install.sh" --server "${join:-http://127.0.0.1:$port}" >/dev/null; then tracker=1
+    else say "Couldn't start the screen-time tracker (see above)."; fi
 fi
 
 say ""
@@ -145,3 +148,4 @@ else
 fi
 [ -z "$blocker" ] || say "  Blocking:         on for this computer. Choose what to block in the app: Settings › Blocking."
 [ -z "$widgets" ] || say "  Plasma widgets:   right-click the desktop › Add Widgets, and search for ignition."
+[ -z "$tracker" ] || say "  Screen time:      counted on this computer. See it in the app's Screen tab."

@@ -11,7 +11,9 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Screen time: the phone's own usage log, which Android keeps anyway. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
     <!-- The blocker needs to know which installed apps are games, and match blocked packages. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -65,6 +67,13 @@
                 <action android:name="ca.heeney.ignition.IGNITE" />
                 <action android:name="ca.heeney.ignition.SCRUB" />
                 <action android:name="ca.heeney.ignition.EXTEND" />
+            </intent-filter>
+        </receiver>
+
+        <!-- doppler's widget asks for today's screen time. -->
+        <receiver android:name=".RefreshReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="ca.heeney.ignition.REFRESH" />
             </intent-filter>
         </receiver>
 

@@ -101,6 +101,7 @@ class MainActivity : Activity() {
         Reactor.update(this)
         UiBus.changed()
         handler.post(poll)
+        ScreenSync.kick(this)
     }
 
     override fun onPause() {
@@ -160,6 +161,10 @@ class MainActivity : Activity() {
                 .put("dnd", JSONObject().put("enabled", p.getBoolean("dnd_enabled", false)).put("granted", Reactor.dndGranted(this)))
                 .put("notifications", JSONObject().put("granted", notificationsGranted()))
                 .put("blocker", JSONObject().put("enabled", BlockerService.enabled(this)))
+                .put(
+                    "usage", JSONObject().put("granted", Collector.hasAccess(this))
+                        .put("last_error", ScreenSync.prefs(this).getString("last_error", "")),
+                )
                 .put(
                     "ring",
                     JSONObject().put("enabled", p.getBoolean("ring_enabled", false)).put("full_screen", canFullScreen())
@@ -237,13 +242,32 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Turn on Ignition under Installed apps.", Toast.LENGTH_LONG).show()
                 appInfo()
             }
+            path == "/native/app/usage" && method == "POST" -> {
+                startActivity(
+                    Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).setData(android.net.Uri.parse("package:$packageName"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                appInfo()
+            }
             path == "/native/app/server" && method == "POST" -> {
                 val url = Sync.normalize(body.optString("server_url"))
+                // The limits come from the server: taking it away would drop them.
+                if (url.isEmpty() && LimitStore.guarded(this)) throw ApiError(403, "Limits are on, so the server stays.")
                 if (url.isNotEmpty()) {
                     try {
                         Sync.ping(url)
                     } catch (e: Exception) {
                         throw ApiError(400, "Can't reach it: ${e.message ?: e.javaClass.simpleName}")
+                    }
+                    // A new address for the same server is fine; a server without these limits isn't.
+                    if (LimitStore.guarded(this)) {
+                        val ids = runCatching {
+                            val arr = Http.get("$url/api/limits").optJSONArray("limits") ?: org.json.JSONArray()
+                            (0 until arr.length()).map { arr.getJSONObject(it).getJSONObject("limit").optString("id") }.toSet()
+                        }.getOrDefault(emptySet())
+                        if (!ids.containsAll(LimitStore.get(this).limits.map { it.id })) {
+                            throw ApiError(403, "Limits are on, and that server doesn't have them.")
+                        }
                     }
                 }
                 synchronized(store) {
@@ -251,6 +275,7 @@ class MainActivity : Activity() {
                         store.serverUrl = url
                         store.resetSync()
                         store.save()
+                        if (url.isEmpty()) LimitStore.forget(this)
                     }
                 }
                 if (url.isNotEmpty()) Sync.run(this)
@@ -288,6 +313,26 @@ class MainActivity : Activity() {
             runOnUiThread { web.performHapticFeedback(constant) }
         }
 
+        /**
+         * For the pages only the server can answer (screen time, limits, devices): app.js calls this and gets
+         * the answer later through window.ignitionReply(id, json), so a slow network never freezes the page.
+         */
+        @JavascriptInterface
+        fun requestAsync(id: Int, method: String, path: String, body: String) {
+            remote.execute {
+                val reply = try {
+                    JSONObject().put("status", 200).put("body", proxy(method, path, body))
+                } catch (e: Http.Failed) {
+                    JSONObject().put("status", e.status).put("body", JSONObject().put("error", e.message))
+                } catch (e: Exception) {
+                    JSONObject().put("status", 502).put("body", JSONObject().put("error", "Can't reach the server"))
+                }
+                runOnUiThread {
+                    if (!isDestroyed) web.evaluateJavascript("window.ignitionReply && window.ignitionReply($id, ${JSONObject.quote(reply.toString())})", null)
+                }
+            }
+        }
+
         /** Called synchronously from app.js; returns {"status": int, "body": ...}. Runs on the WebView's bridge thread. */
         @JavascriptInterface
         fun request(method: String, path: String, body: String): String {
@@ -303,7 +348,25 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun proxy(method: String, path: String, body: String): Any {
+        if (!path.startsWith("/api/")) throw Http.Failed(404, "not found")
+        val url = Store.get(this).let { synchronized(it) { it.serverUrl } }
+        if (url.isEmpty()) throw Http.Failed(503, "Needs the server")
+        var send = body.ifBlank { null }
+        // An unlock is the phone's: the server keeps which device it was.
+        if (send != null && path.endsWith("/unlock")) {
+            val o = JSONObject(send)
+            if (o.has("device")) send = o.put("device", ScreenSync.deviceId(this, url)).toString()
+        }
+        val text = Http.send(method, url + path, if (method == "GET") null else send ?: "{}")
+        if (method != "GET" && path.startsWith("/api/limits")) LimitStore.fetchSoon(this, 0)
+        return JSONTokener(text).nextValue()
+    }
+
     companion object {
         const val EXTRA_PAGE = "page"
+
+        /** Requests to the server for the page, off its thread. One pool for the app, whatever the activity. */
+        private val remote = java.util.concurrent.Executors.newFixedThreadPool(2)
     }
 }

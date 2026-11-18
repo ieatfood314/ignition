@@ -80,6 +80,24 @@ For updates without a password, see Updating in docs/advanced.md."
         echo "$head" >"$mark"
     fi
 
+    # The screen-time tracker, on Plasma desktops: in on the first update that finds one (taking over from
+    # lightcurve's), and restarted when its code changes.
+    tmark="$(dirname "$state")/tracker-commit"
+    tunit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/ignition-tracker.service"
+    if [ -n "$code" ] && [ -f "$code/tracker/install.sh" ] && command -v kpackagetool6 >/dev/null; then
+        head=$(git -C "$code" rev-parse HEAD)
+        last=$(cat "$tmark" 2>/dev/null || true)
+        if [ -z "$last" ] && [ ! -f "$tunit" ]; then
+            if sh "$code/tracker/install.sh" >/dev/null; then say "screen-time tracker started"
+            else say "couldn't start the screen-time tracker"; fi
+        elif [ -f "$tunit" ] && [ "$last" != "$head" ] && ! git -C "$code" diff --quiet "${last:-HEAD}" "$head" -- tracker server/screen; then
+            systemctl --user try-restart ignition-tracker.service
+            say "screen-time tracker updated"
+        fi
+        mkdir -p "$(dirname "$tmark")"
+        echo "$head" >"$tmark"
+    fi
+
     [ -n "$code" ] || say "not installed on this computer"
 }
 main "$@"; exit

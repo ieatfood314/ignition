@@ -26,6 +26,8 @@
     </a>
     <nav class="tabs" aria-label="Pages">
       <a href="#ignite" data-tab="ignite"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M10 2h4"/></svg><span id="tab-ignite-label">Ignite</span></a>
+      <a href="#screen" data-tab="screen"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></svg><span>Screen</span></a>
+      <a href="#limits" data-tab="limits"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span id="tab-limits-label">Limits</span></a>
       <a href="#stats" data-tab="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-7M12 20V5M19 20v-10"/></svg><span>Stats</span></a>
       <i class="tab-ind" aria-hidden="true"></i>
     </nav>
@@ -91,8 +93,57 @@
           <p class="window-note" id="window-note" hidden></p>
           <div class="burn-stats" id="burn-stats"></div>
           <p class="next-sched" id="next-sched" hidden></p>
+          <a class="screen-today" id="screen-today" href="#screen" hidden></a>
           <ul class="enforcers" id="enforcers"></ul>
         </div>
+      </div>
+    </section>
+
+    <section id="page-screen" class="page" hidden>
+      <div class="page-head">
+        <h1>Screen</h1>
+        <div class="seg range" id="sc-view" role="group" aria-label="View">
+          <button type="button" data-view="day">Day</button>
+          <button type="button" data-view="weeks">Weeks</button>
+          <button type="button" data-view="apps">Apps</button>
+        </div>
+      </div>
+      <div class="sc-nav" id="sc-nav">
+        <button type="button" class="icon-btn" id="sc-prev" aria-label="Earlier"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <span id="sc-when"></span>
+        <button type="button" class="icon-btn" id="sc-next" aria-label="Later"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+        <div class="seg range" id="sc-days" role="group" aria-label="Days" hidden>
+          <button type="button" data-days="7">7 d</button>
+          <button type="button" data-days="28">28 d</button>
+          <button type="button" data-days="91">91 d</button>
+        </div>
+      </div>
+      <div class="screen" id="screen">
+        <div class="hero"><span class="hero-val" id="sc-total"></span><span class="hero-sub" id="sc-sub"></span></div>
+        <div class="who" id="sc-who"></div>
+        <div class="chart sc-chart" id="sc-chart"></div>
+        <div class="cat-legend" id="sc-legend"></div>
+        <dl class="sc-facts" id="sc-facts"></dl>
+        <h2 class="st-h hud-h"><span>Apps and sites</span><span class="st-note" id="sc-count"></span></h2>
+        <ul class="things" id="sc-things"></ul>
+        <button type="button" class="ghost small st-more" id="sc-more" hidden>Show all</button>
+      </div>
+      <p class="empty" id="sc-empty" hidden></p>
+    </section>
+
+    <section id="page-limits" class="page" hidden>
+      <div class="page-head">
+        <h1>Limits</h1>
+        <button type="button" class="ghost small lim-new" id="lim-new">+ New limit</button>
+      </div>
+      <p class="lim-burn" id="lim-burn" hidden>Burning. No unlocks till it ends.</p>
+      <ul class="limits" id="lim-list"></ul>
+      <p class="empty" id="lim-empty" hidden></p>
+      <div class="lim-settings" id="lim-settings" hidden>
+        <h2 class="st-h hud-h"><span>Changes</span><span class="st-note" id="lim-set-note"></span></h2>
+        <div class="set-row"><label class="auto" for="lim-wait">Loosening waits</label><input type="number" id="lim-wait" inputmode="numeric" min="0" max="1440"><span>min</span></div>
+        <div class="toggle-row"><span>Lock ignition's settings on the phone<span class="hint inline">its blocker, usage access and uninstall</span></span><label class="switch" aria-label="Lock ignition's settings on the phone"><input type="checkbox" id="lim-guard"><i></i></label></div>
+        <div class="lim-set-actions" id="lim-set-actions"></div>
       </div>
     </section>
 
@@ -157,13 +208,19 @@
             <span class="sys-viz" id="viz-blocking"></span>
             <span class="set-sum" id="sum-blocking"></span>
           </a>
-          <a class="sys app-only" href="#settings/phone" data-go="phone" style="--n:4">
+          <a class="sys" href="#settings/devices" data-go="devices" style="--n:4">
+            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="13" height="10" rx="1.5"/><path d="M6 19h5M8.5 15v4"/><rect x="17" y="8" width="5" height="11" rx="1"/></svg><b class="pill" id="pill-devices"></b></span>
+            <span class="sys-name">Devices</span>
+            <span class="sys-viz" id="viz-devices"></span>
+            <span class="set-sum" id="sum-devices"></span>
+          </a>
+          <a class="sys app-only" href="#settings/phone" data-go="phone" style="--n:5">
             <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg><b class="pill" id="pill-phone"></b></span>
             <span class="sys-name">This phone</span>
             <span class="sys-viz" id="viz-phone"></span>
             <span class="set-sum" id="sum-phone"></span>
           </a>
-          <a class="sys app-only" href="#settings/sync" data-go="sync" style="--n:5">
+          <a class="sys app-only" href="#settings/sync" data-go="sync" style="--n:6">
             <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a7 7 0 0 1 12.5-3M19 15a7 7 0 0 1-12.5 3"/><path d="M17.5 2.5v3.5H14M6.5 21.5V18H10"/></svg><b class="pill" id="pill-sync"></b></span>
             <span class="sys-name">Sync</span>
             <span class="sys-viz" id="viz-sync"></span>
@@ -236,6 +293,12 @@
             <div class="set-row"><label class="auto" for="end-early">Allowed for burns over</label><input type="number" id="end-early" inputmode="numeric" min="0" max="720"><span>min</span></div>
           </section>
 
+          <section class="set-page" data-page="devices" data-title="Devices" hidden>
+            <ul class="devices" id="devices"></ul>
+            <h3>Add a computer</h3>
+            <pre class="cmd" id="dev-cmd"></pre>
+          </section>
+
           <section class="set-page" data-page="apps" data-title="Choose apps" hidden>
             <input class="app-search" id="app-search" placeholder="Search apps" autocapitalize="off" spellcheck="false">
             <ul class="app-pick" id="app-pick"></ul>
@@ -244,6 +307,7 @@
           <section class="set-page" data-page="phone" data-title="This phone" hidden>
             <div class="toggle-row"><span>Notifications</span><button type="button" class="ghost small" id="notif-btn">Allow</button></div>
             <div class="toggle-row"><span><i class="lamp" id="lamp-blocker"></i>App &amp; site blocker<span class="hint inline" id="blocker-state"></span></span><button type="button" class="ghost small" id="blocker-btn">Turn on</button></div>
+            <div class="toggle-row"><span><i class="lamp" id="lamp-usage"></i>Screen time<span class="hint inline" id="usage-state"></span></span><button type="button" class="ghost small" id="usage-btn">Turn on</button></div>
             <div class="toggle-row"><span>Ring when a T-minus lifts off<span class="hint inline">wakes the screen with a short sound</span></span><label class="switch" aria-label="Ring at liftoff"><input type="checkbox" id="ring-toggle"><i></i></label></div>
             <div class="toggle-row" id="ring-sound-row" hidden>
               <div class="seg" id="ring-sound">
@@ -300,6 +364,37 @@
     </div>
   </dialog>
 
+  <dialog id="limit-dialog" class="sheet limit-sheet" aria-labelledby="lim-title">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <h2 id="lim-title" tabindex="-1">New limit</h2>
+    <input class="lim-name" id="lim-name" placeholder="Name" maxlength="60" aria-label="Name">
+    <h3>What</h3>
+    <div class="chips cats" id="lim-cats" role="group" aria-label="Everything of a kind"></div>
+    <ul class="tag-list" id="lim-things"></ul>
+    <form class="tag-add" id="lim-add"><input placeholder="add an app or site" list="lim-known" autocapitalize="off" spellcheck="false" aria-label="Add an app or site"><button type="submit" class="ghost small">Add</button></form>
+    <datalist id="lim-known"></datalist>
+    <h3>Rules</h3>
+    <div class="rules" id="lim-rules"></div>
+    <div class="chips add-rule" id="lim-add-rule"></div>
+    <h3>Unlocking</h3>
+    <div class="toggle-row"><span>Allow unlocking</span><label class="switch" aria-label="Allow unlocking"><input type="checkbox" id="lim-unlock-on"><i></i></label></div>
+    <div class="unlock-set" id="lim-unlock">
+      <div class="set-row"><label>Hold</label><input type="number" id="lim-hold" inputmode="numeric" min="1" max="60"><span>s, then wait</span><input type="number" id="lim-uwait" inputmode="numeric" min="0" max="240"><span>min</span></div>
+      <div class="set-row"><label>Opens for</label><input type="number" id="lim-grant" inputmode="numeric" min="1" max="240"><span>min,</span><input type="number" id="lim-perday" inputmode="numeric" min="1" max="50" placeholder="any"><span>a day</span></div>
+    </div>
+    <p class="hint lim-msg" id="lim-msg"></p>
+    <div class="sheet-actions" id="lim-actions"></div>
+  </dialog>
+
+  <dialog id="thing-dialog" class="sheet thing-sheet" aria-labelledby="thing-title">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <h2 id="thing-title" tabindex="-1"></h2>
+    <p class="hint" id="thing-sub"></p>
+    <h3>Counts as</h3>
+    <div class="chips cats" id="thing-cats"></div>
+    <div class="sheet-actions"><button type="button" class="ghost" id="thing-close">Close</button></div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" hidden></div>
   <div class="chart-tip" id="chart-tip" role="status" hidden></div>
 
@@ -325,5 +420,6 @@
   <script src="flame.js"></script>
   <script src="fx.js"></script>
   <script src="app.js"></script>
+  <script src="screen.js"></script>
 </body>
 </html>

@@ -36,6 +36,13 @@ if [ -f "$unit" ]; then
         tailscale serve --http="$tailnet_port" off 2>/dev/null || sudo tailscale serve --http="$tailnet_port" off 2>/dev/null || true
     fi
 fi
+tunit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/ignition-tracker.service"
+if [ -f "$tunit" ]; then
+    echo "Removing the screen-time tracker…"
+    systemctl --user disable --now ignition-tracker.service 2>/dev/null || true
+    rm -f "$tunit"
+    systemctl --user daemon-reload
+fi
 [ ! -d "$data/app" ] || rm -rf "$data/app"
 rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/ignition"
 

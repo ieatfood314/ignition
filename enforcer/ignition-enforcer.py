@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Ignition enforcer: runs as root on each machine and applies blocks while a session is active.
+"""Ignition enforcer: runs as root on each machine and applies blocks while a session is active, and
+whenever a screen-time limit is closed.
 
-Every few seconds it heartbeats to the ignition server, which replies with the current session and the
-shared block list. While a session is active it:
+Every few seconds it heartbeats to the ignition server, which replies with the current session, the
+shared block list and what the closed limits cover. While a limit is closed (and not unlocked), its sites
+are kept out of /etc/hosts and its programs are paused or killed like a burn's: open ones are frozen,
+new ones killed. A limit on Play also catches games themselves (Steam and Proton games, Windows .exe
+programs). While a session is active it:
   * cuts off T3 Code clients: an nftables table rejects loopback TCP to the T3 ports from every
     process outside the T3 server's own cgroups (so running threads keep going, but Tailscale Serve,
     SSH tunnels and local desktop apps can't reach it), and existing client connections are killed;
@@ -17,8 +21,8 @@ shared block list. While a session is active it:
   * runs the optional burn/idle hooks (e.g. to recolour RGB lighting).
 With hooks.steps set, the burn hook re-runs each time another 1/steps of the burn is used up, and a
 countdown hook does the same through a T-minus, so the lighting can count down (see openrgb-ram).
-The last known session and block list are cached on disk, so blocks hold until the session ends even if
-the server is unreachable.
+The last known session, block list and limits are cached on disk, so blocks hold until the session ends
+(and limits until they'd open) even if the server is unreachable.
 """
 
 import json
@@ -45,6 +49,8 @@ HOSTS_BEGIN = "# >>> ignition: blocked while burning >>>"
 HOSTS_END = "# <<< ignition <<<"
 ACCENT = "e23a29"
 COUNTDOWN_COLOR = "ff8000"
+GAME = "game"  # the name a running game is blocked under when a limit covers Play
+NO_LIMITS = {"sites": [], "programs": [], "games": False, "limits": []}
 
 # Other domains that belong to a site; subdomains are covered separately.
 ALIASES = {
@@ -107,13 +113,15 @@ class Enforcer:
         self.notify_user = cfg.get("notify_user")
         self.session = self.load_cache()
         self.remote = self.session.pop("block", None) or {"sites": [], "programs": []}
+        self.limits = self.session.pop("limits", None) or NO_LIMITS
+        self.limit_since = self.session.pop("limit_since", None) or {}  # limit id -> when it closed here
         self.armed = False
         self.error = None
         self.killed = 0
         self.last_notify = 0
         self.stop = threading.Event()
         self.freeze_lock = threading.Lock()
-        self.frozen = self.load_frozen()  # pid -> start time (clock ticks) of what's paused
+        self.frozen = self.load_frozen()  # pid -> [start time (clock ticks), name, "burn"|"limit"]
         self.warned = None  # the T-minus whose one-minute warning was shown
 
     # ---------- session state ----------
@@ -127,7 +135,8 @@ class Enforcer:
     def save_cache(self):
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         tmp = CACHE.with_suffix(".tmp")
-        tmp.write_text(json.dumps({**self.session, "block": self.remote}))
+        tmp.write_text(json.dumps({**self.session, "block": self.remote, "limits": self.limits,
+                                   "limit_since": self.limit_since}))
         tmp.replace(CACHE)
 
     @property
@@ -137,6 +146,27 @@ class Enforcer:
     def active(self):
         s = self.session
         return bool(s.get("active")) and time.time() < s.get("ends_at", 0)
+
+    def closed_limits(self):
+        """Limits closed right now. Offline, the cached ones still count until they'd have opened."""
+        t = time.time()
+        return [lim for lim in self.limits.get("limits") or [] if lim.get("until") is None or t < lim["until"]]
+
+    def wanted(self):
+        """Program name -> (since, limit or None for the burn): what to block now. Open before `since`
+        means it gets paused; started after, killed."""
+        out, t = {}, time.time()
+        for lim in self.closed_limits():
+            since = self.limit_since.get(lim["id"], t)
+            for name in lim.get("programs") or []:
+                out.setdefault(name, (since, lim))
+            if lim.get("games"):
+                out.setdefault(GAME, (since, lim))
+        if self.active():
+            started = self.session.get("started_at") or 0
+            for name in self.block:
+                out[name] = (started, None)
+        return out
 
     def sync(self):
         body = json.dumps({
@@ -155,8 +185,11 @@ class Enforcer:
         new = {k: s.get(k) for k in ("active", "phase", "session_id", "started_at", "ends_at")}
         new["created_at"] = (s.get("session") or {}).get("created_at")
         remote = s.get("block") or self.remote
-        if new != self.session or remote != self.remote:
-            self.session, self.remote = new, remote
+        limits = s.get("limit_block") or NO_LIMITS
+        ids = {lim["id"] for lim in limits.get("limits") or []}
+        since = {i: self.limit_since.get(i, time.time()) for i in ids}
+        if new != self.session or remote != self.remote or limits != self.limits or since != self.limit_since:
+            self.session, self.remote, self.limits, self.limit_since = new, remote, limits, since
             self.save_cache()
         return None
 
@@ -368,10 +401,26 @@ class Enforcer:
                 return name
         return None
 
-    def scan(self):
+    @staticmethod
+    def is_game(pid, argv):
+        """A Windows program (Wine, Proton) or anything Steam launched as a game."""
+        if argv and os.path.basename(argv[0].replace("\\", "/")).lower().endswith(".exe"):
+            return True
+        try:
+            env = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        except OSError:
+            return False
+        for e in env:
+            k, _, v = e.partition(b"=")
+            if k in (b"SteamAppId", b"STEAM_COMPAT_APP_ID") and v.strip(b"0"):
+                return True
+        return False
+
+    def scan(self, names):
         """Running blocked programs as [(pid, name, started, uid)], plus every process's children."""
         btime, hz = self.boot_time(), os.sysconf("SC_CLK_TCK")
-        names = self.block
+        games = GAME in names
+        me = os.getpid()
         found, children = [], {}
         for d in Path("/proc").iterdir():
             if not d.name.isdigit():
@@ -383,6 +432,8 @@ class Enforcer:
                 argv = (d / "cmdline").read_bytes().split(b"\0")
                 argv = [a.decode(errors="replace") for a in argv if a]
                 name = self.blocked_name(argv, names)
+                if not name and games and int(d.name) != me and self.is_game(int(d.name), argv):
+                    name = GAME
                 if not name:
                     continue
                 start = btime + int(fields[19]) / hz
@@ -400,16 +451,20 @@ class Enforcer:
             i += 1
         return tree
 
-    def kill_blocked_processes(self):
-        """Kill blocked programs started during the burn; pause the ones that were already open."""
-        started = self.session.get("started_at") or 0
-        found, children = self.scan()
+    def kill_blocked_processes(self, want):
+        """Kill blocked programs started after the burn or limit began; pause the ones already open."""
+        found, children = self.scan(want)
         hits, paused = [], []
+        seen = set()
         for pid, name, start, uid in found:
+            if pid in seen:  # already handled as part of a blocked parent's tree
+                continue
+            since, lim = want[name]
             tree = self.tree(pid, children)
-            if start < started:
-                if self.freeze(tree):
-                    paused.append(name)
+            seen.update(tree)
+            if start < since:
+                if self.freeze(tree, name, "limit" if lim else "burn"):
+                    paused.append((name, lim))
                     log(f"paused {name} pid={pid} uid={uid} ({len(tree)} process(es))")
                 continue
             # Take what it spawned down with it (topgrade -> sudo pacman, ...): those all started later.
@@ -418,14 +473,29 @@ class Enforcer:
                     os.kill(p, signal.SIGKILL)
                 except OSError:
                     pass
-            hits.append(name)
+            hits.append((name, lim))
             log(f"killed {name} pid={pid} uid={uid}" + (f" and {len(tree) - 1} child(ren)" if len(tree) > 1 else ""))
         if paused:
-            ends = time.strftime("%H:%M", time.localtime(self.session.get("ends_at", 0)))
-            self.notify(f"{paused[0].capitalize()} is paused", f"Ignition is burning until {ends}. It picks up "
-                        "right where you left it after.")
+            name, lim = paused[0]
+            if lim:
+                self.notify(f"{name.capitalize()} is paused", f"{self.closed_text(lim)} It picks up where you left it.")
+            else:
+                ends = time.strftime("%H:%M", time.localtime(self.session.get("ends_at", 0)))
+                self.notify(f"{name.capitalize()} is paused", f"Ignition is burning until {ends}. It picks up "
+                            "right where you left it after.")
         elif hits:
-            self.notify(f"{hits[0].capitalize()} is blocked", self.remaining_text())
+            name, lim = hits[0]
+            self.notify(f"{name.capitalize()} is blocked", self.closed_text(lim) if lim else self.remaining_text())
+
+    @staticmethod
+    def closed_text(lim):
+        until = lim.get("until")
+        if until is None:
+            return f"{lim.get('label') or 'This'} is closed."
+        when = time.strftime("%H:%M", time.localtime(until))
+        if time.localtime(until).tm_yday != time.localtime().tm_yday:
+            when = time.strftime("%a %H:%M", time.localtime(until))
+        return f"{lim.get('label') or 'This'} is closed until {when}."
 
     # A blocked program that's already open at liftoff is frozen (SIGSTOP) instead of killed, so a game
     # comes back exactly where it was when the burn ends. Sending it SIGCONT yourself doesn't help: it's
@@ -451,9 +521,18 @@ class Enforcer:
 
     def load_frozen(self):
         try:
-            return {int(k): v for k, v in json.loads(FROZEN.read_text()).items()}
-        except (OSError, ValueError):
+            raw = json.loads(FROZEN.read_text()).items()
+        except (OSError, ValueError, AttributeError):
             return {}
+        out = {}
+        for k, v in raw:
+            # Before limits, each entry was just the start time, and only burns froze things.
+            v = v if isinstance(v, list) else [v]
+            try:
+                out[int(k)] = [int(v[0]), str(v[1]) if len(v) > 1 else "", str(v[2]) if len(v) > 2 else "burn"]
+            except (ValueError, TypeError, IndexError):
+                continue
+        return out
 
     def save_frozen(self):
         FROZEN.parent.mkdir(parents=True, exist_ok=True)
@@ -461,7 +540,7 @@ class Enforcer:
         tmp.write_text(json.dumps(self.frozen))
         tmp.replace(FROZEN)
 
-    def freeze(self, tree):
+    def freeze(self, tree, name="", why="burn"):
         """Freeze a process tree. True if any of it was newly frozen (not just re-frozen)."""
         with self.freeze_lock:
             if self.stop.is_set():
@@ -480,7 +559,7 @@ class Enforcer:
             for p, ticks in todo:
                 try:
                     os.kill(p, signal.SIGSTOP)
-                    self.frozen[p] = ticks
+                    self.frozen[p] = [ticks, name, why]
                 except OSError:
                     pass
             self.save_frozen()
@@ -488,21 +567,30 @@ class Enforcer:
                 log(f"froze {len(todo)} process(es) again")
             return bool(fresh)
 
-    def thaw(self):
+    def thaw(self, want=None):
+        """Resume what's paused and no longer blocked (everything, without `want`)."""
         with self.freeze_lock:
-            if not self.frozen:
-                return
-            for p, ticks in reversed(list(self.frozen.items())):
+            done = []
+            for p, (ticks, name, why) in reversed(list(self.frozen.items())):
+                if want is not None and (name in want if name else self.active()):
+                    continue
                 st = self.proc_start(p)
                 if st and st[1] == ticks:  # not a new process that reused the pid
                     try:
                         os.kill(p, signal.SIGCONT)
                     except OSError:
                         pass
-            log(f"resumed {len(self.frozen)} paused process(es)")
-            self.frozen = {}
+                done.append((p, why))
+            if not done:
+                return
+            for p, _ in done:
+                del self.frozen[p]
             self.save_frozen()
-        self.notify("Burn complete", "Everything ignition paused is back where you left it.")
+            log(f"resumed {len(done)} paused process(es)")
+        if any(why == "burn" for _, why in done) and not self.active():
+            self.notify("Burn complete", "Everything ignition paused is back where you left it.")
+        else:
+            self.notify("Open again", "What ignition paused is back where you left it.")
 
     def minimize(self, pids):
         """Minimize these processes' windows (KDE Plasma), so a frozen full-screen game isn't in the way."""
@@ -533,7 +621,7 @@ class Enforcer:
         if not self.block or not s.get("session_id") or self.warned == s["session_id"] or not 0 < left <= WARN_SECONDS:
             return
         self.warned = s["session_id"]
-        names = sorted({name for _, name, _, _ in self.scan()[0]})
+        names = sorted({name for _, name, _, _ in self.scan({n: None for n in self.block})[0]})
         if names:
             what = ", ".join(n.capitalize() for n in names)
             self.notify(f"Liftoff in {round(left)} seconds",
@@ -569,16 +657,17 @@ class Enforcer:
 
     def enforce(self, resumed=False):
         self.show(again=resumed)
+        sites = [s for lim in self.closed_limits() for s in lim.get("sites") or []]
         if not self.active():
             if self.armed:
                 log("session over: lifting blocks")
             self.clear_nft()
-            self.apply_hosts([])
+            self.apply_hosts(sorted(set(sites)))
             self.armed = False
             return
         if not self.armed:
             log(f"session active until {time.ctime(self.session['ends_at'])}: arming")
-        self.apply_hosts(self.remote.get("sites") or [])
+        self.apply_hosts(sorted(set(sites) | set(self.remote.get("sites") or [])))
         if self.t3.get("ports") or self.block_ports:
             self.apply_nft()
             self.kill_clients()
@@ -605,11 +694,12 @@ class Enforcer:
         while not self.stop.is_set():
             try:
                 self.show()  # the next step of the RAM countdown, on the second rather than at the next sync
+                want = self.wanted()
+                self.thaw(want)
                 if not self.active():
-                    self.thaw()
                     self.warn_liftoff()
-                elif self.block:
-                    self.kill_blocked_processes()
+                if want:
+                    self.kill_blocked_processes(want)
             except Exception as e:  # noqa: BLE001
                 log(f"process scan failed: {e}")
             self.stop.wait(1)
