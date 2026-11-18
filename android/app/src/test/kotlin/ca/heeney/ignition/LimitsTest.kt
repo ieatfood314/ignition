@@ -39,13 +39,6 @@ class LimitsTest {
         assertTrue(eval(l, emptyList(), at(14, 12)).blocked)
     }
 
-    @Test fun rollingWindow() {
-        val l = lim(Rule("every", minutes = 30, hours = 4))
-        val use = listOf(Iv(at(9, 8), at(9, 8, 20)), Iv(at(9, 10), at(9, 10, 10)))
-        eval(l, use, at(9, 10, 10)).let { assertTrue(it.blocked); assertEquals(at(9, 12, 5), it.until) }
-        assertFalse(eval(l, use, at(9, 12, 6)).blocked)
-    }
-
     @Test fun closedHoursAcrossMidnight() {
         val l = lim(Rule("block", from = "22:00", to = "07:00"))
         eval(l, emptyList(), at(9, 23)).let { assertTrue(it.blocked); assertEquals(at(10, 7), it.until) }
@@ -59,22 +52,8 @@ class LimitsTest {
         assertFalse(eval(l, emptyList(), at(15, 2)).blocked)
     }
 
-    @Test fun windowAllowance() {
-        val l = lim(Rule("window", minutes = 20, from = "09:00", to = "17:00", days = setOf(0, 1, 2, 3, 4)))
-        val use = listOf(Iv(at(9, 8), at(9, 9, 10)), Iv(at(9, 12), at(9, 12, 10)))
-        eval(l, use, at(9, 12, 10)).let { assertTrue(it.blocked); assertEquals(at(9, 17), it.until) }
-        assertFalse(eval(l, use, at(9, 17, 30)).blocked)
-    }
-
-    @Test fun stretchNeedsARealBreak() {
-        val l = lim(Rule("stretch", minutes = 20, rest = 30))
-        val use = listOf(Iv(at(9, 9), at(9, 9, 15)), Iv(at(9, 9, 25), at(9, 9, 30)))
-        eval(l, use, at(9, 9, 30)).let { assertTrue(it.blocked); assertEquals(at(9, 10), it.until) }
-        eval(l, use, at(9, 10)).let { assertFalse(it.blocked); assertEquals(20 * min, it.left) }
-    }
-
     @Test fun tightestRuleWins() {
-        val l = lim(Rule("day", minutes = 120), Rule("every", minutes = 30, hours = 2))
+        val l = lim(Rule("day", minutes = 120), Rule("block", from = "09:30", to = "10:00"))
         assertEquals(20 * min, eval(l, listOf(Iv(at(9, 9), at(9, 9, 10))), at(9, 9, 10)).left)
     }
 

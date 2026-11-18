@@ -46,15 +46,6 @@ class Rules(unittest.TestCase):
         self.assertFalse(limits.evaluate(l, [], at(MON, 12))["blocked"])
         self.assertTrue(limits.evaluate(l, [], at("2026-03-14", 12))["blocked"])
 
-    def test_rolling_window(self):
-        l = lim({"kind": "every", "minutes": 30, "hours": 4})
-        use = [[at(MON, 8), at(MON, 8, 20)], [at(MON, 10), at(MON, 10, 10)]]
-        s = limits.evaluate(l, use, at(MON, 10, 10))
-        self.assertTrue(s["blocked"])
-        # five minutes have to slide out: 08:05 + 4h
-        self.assertEqual(s["until"], at(MON, 12, 5))
-        self.assertFalse(limits.evaluate(l, use, at(MON, 12, 6))["blocked"])
-
     def test_closed_hours_across_midnight(self):
         l = lim({"kind": "block", "from": "22:00", "to": "07:00"})
         s = limits.evaluate(l, [], at(MON, 23))
@@ -70,27 +61,8 @@ class Rules(unittest.TestCase):
         self.assertTrue(limits.evaluate(l, [], at("2026-03-14", 2))["blocked"])  # early Saturday
         self.assertFalse(limits.evaluate(l, [], at("2026-03-15", 2))["blocked"])  # early Sunday
 
-    def test_window_allowance(self):
-        l = lim({"kind": "window", "minutes": 20, "from": "09:00", "to": "17:00", "days": [0, 1, 2, 3, 4]})
-        use = [[at(MON, 8), at(MON, 9, 10)], [at(MON, 12), at(MON, 12, 10)]]
-        s = limits.evaluate(l, use, at(MON, 12, 10))
-        self.assertTrue(s["blocked"])
-        self.assertEqual(s["until"], at(MON, 17))
-        self.assertFalse(limits.evaluate(l, use, at(MON, 17, 30))["blocked"])
-
-    def test_stretch_needs_a_real_break(self):
-        l = lim({"kind": "stretch", "minutes": 20, "rest": 30})
-        # 15 min, a 10 min pause (too short to count), 5 more: one stretch of 20
-        use = [[at(MON, 9), at(MON, 9, 15)], [at(MON, 9, 25), at(MON, 9, 30)]]
-        s = limits.evaluate(l, use, at(MON, 9, 30))
-        self.assertTrue(s["blocked"])
-        self.assertEqual(s["until"], at(MON, 10))
-        s = limits.evaluate(l, use, at(MON, 10))
-        self.assertFalse(s["blocked"])
-        self.assertEqual(s["left"], 20 * M)
-
     def test_tightest_rule_wins(self):
-        l = lim({"kind": "day", "minutes": 120}, {"kind": "every", "minutes": 30, "hours": 2})
+        l = lim({"kind": "day", "minutes": 120}, {"kind": "block", "from": "09:30", "to": "10:00"})
         use = [[at(MON, 9), at(MON, 9, 10)]]
         self.assertEqual(limits.evaluate(l, use, at(MON, 9, 10))["left"], 20 * M)
 
@@ -98,7 +70,7 @@ class Rules(unittest.TestCase):
         for bad in ({"targets": [], "rules": [{"kind": "day", "minutes": 5}]},
                     {"targets": ["n:x"], "rules": []},
                     {"targets": ["n:x"], "rules": [{"kind": "block", "from": "25:00", "to": "07:00"}]},
-                    {"targets": ["n:x"], "rules": [{"kind": "window", "minutes": 5, "from": "07:00", "to": "07:00"}]},
+                    {"targets": ["n:x"], "rules": [{"kind": "every", "minutes": 30, "hours": 4}]},
                     {"targets": ["c:nope"], "rules": [{"kind": "day", "minutes": 5}]}):
             with self.assertRaises(ValueError):
                 limits.clean(bad)
@@ -108,7 +80,7 @@ class Loosening(unittest.TestCase):
     def test_tighter_is_not_loosening(self):
         old = lim({"kind": "day", "minutes": 60})
         new = dict(old, rules=[{"kind": "day", "minutes": 30, "days": limits.ALL_DAYS},
-                               {"kind": "stretch", "minutes": 10, "rest": 10}])
+                               {"kind": "block", "from": "22:00", "to": "07:00", "days": limits.ALL_DAYS}])
         self.assertFalse(limits.loosens(old, new))
 
     def test_more_minutes_loosens(self):

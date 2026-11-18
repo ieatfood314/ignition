@@ -422,10 +422,9 @@ for (const el of [$("#sc-chart")]) {
 
 /* ---- the Limits tab ---- */
 
-const RULE_KINDS = { day: "Daily time", block: "Blocked hours", window: "Time between hours", every: "Time per few hours", stretch: "Breaks" };
+const RULE_KINDS = { day: "Time per day", block: "Blocked hours" };
 const RULE_DEFAULTS = {
-  day: { minutes: 60 }, every: { minutes: 30, hours: 4 }, block: { from: "22:00", to: "07:00" },
-  window: { minutes: 20, from: "09:00", to: "17:00" }, stretch: { minutes: 20, rest: 30 },
+  day: { minutes: 60 }, block: { from: "22:00", to: "07:00" },
 };
 const DEFAULT_UNLOCK = { hold: 5, wait: 3, grant: 10, per_day: null };
 
@@ -443,10 +442,7 @@ function daysText(days) {
 function ruleText(r) {
   const on = daysText(r.days);
   if (r.kind === "day") return r.minutes ? `Up to ${minText(r.minutes)} a day${on}` : `Blocked all day${on}`;
-  if (r.kind === "every") return `Up to ${minText(r.minutes)} in any ${r.hours === 1 ? "hour" : `${r.hours} hours`}`;
-  if (r.kind === "block") return r.from === r.to ? `Blocked all day${on}` : `Blocked from ${r.from} to ${r.to}${on}`;
-  if (r.kind === "window") return `Up to ${minText(r.minutes)} between ${r.from} and ${r.to}${on}`;
-  return `Up to ${minText(r.minutes)} at a time, then a ${minText(r.rest)} break`;
+  return r.from === r.to ? `Blocked all day${on}` : `Blocked from ${r.from} to ${r.to}${on}`;
 }
 const rulesText = (rules) => rules.map((r, i) => { const t = ruleText(r); return i ? t[0].toLowerCase() + t.slice(1) : t; }).join(", ");
 
@@ -616,9 +612,7 @@ const limitDialog = $("#limit-dialog");
 let draft = null, editing = null;
 
 function newRule(kind) {
-  const r = { kind, ...RULE_DEFAULTS[kind] };
-  if (["day", "block", "window"].includes(kind)) r.days = [...ALL_DAYS];
-  return r;
+  return { kind, ...RULE_DEFAULTS[kind], days: [...ALL_DAYS] };
 }
 
 async function openLimit(item) {
@@ -689,10 +683,7 @@ function ruleRow(r, i) {
   const allDay = r.kind === "block" && r.from === r.to;
   let f = "";
   if (r.kind === "day") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min a day</span>`;
-  if (r.kind === "every") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min in any</span>${num("hours", 1, 24, "Hours")}<span>hours</span>`;
   if (r.kind === "block") f = allDay ? `<span>Blocked all day</span>` : `<span>Blocked from</span>${time("from", "From")}<span>to</span>${time("to", "To")}`;
-  if (r.kind === "window") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min between</span>${time("from", "From")}<span>and</span>${time("to", "To")}`;
-  if (r.kind === "stretch") f = `<span>Up to</span>${num("minutes", 1, 720, "Minutes at a time")}<span>min at a time, then a</span>${num("rest", 1, 720, "Break minutes")}<span>min break</span>`;
   row.innerHTML = `<div class="rule-line">${f}<button type="button" class="tag-x rule-x" aria-label="Remove rule"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button></div>`
     + (r.kind === "block" ? `<div class="toggle-row small"><span>All day</span><label class="switch" aria-label="All day"><input type="checkbox" class="all-day" ${allDay ? "checked" : ""}><i></i></label></div>` : "")
     + (r.days ? `<div class="sched-days">${ALL_DAYS.map((d) => `<button type="button" data-d="${d}" class="${r.days.includes(d) ? "on" : ""}" aria-pressed="${r.days.includes(d)}" aria-label="${LDAYS[d]}">${LDAYS[d][0]}</button>`).join("")}</div>` : "");

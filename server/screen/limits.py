@@ -2,14 +2,11 @@
 
 A limit covers some things (by name, `n:youtube`, or by category, `c:play`) and holds rules:
 
-    {"kind": "day",     "minutes": 60, "days": [0..6]}                       up to 60 min a day
-    {"kind": "every",   "minutes": 30, "hours": 4}                           up to 30 min in any 4 hours
-    {"kind": "block",   "from": "22:00", "to": "07:00", "days": [...]}       closed between (from == to: all day)
-    {"kind": "window",  "minutes": 20, "from": "09:00", "to": "17:00", "days": [...]}   up to 20 min between
-    {"kind": "stretch", "minutes": 20, "rest": 30}                           20 min at a time, then 30 off
+    {"kind": "day",   "minutes": 60, "days": [0..6]}                    up to 60 min a day
+    {"kind": "block", "from": "22:00", "to": "07:00", "days": [...]}    blocked between (from == to: all day)
 
-Days are Python weekdays (0 is Monday). A "day" rule follows lightcurve's day (04:00 to 04:00); a time
-window belongs to the weekday it starts on. Time on every device counts, two at once counted once.
+Days are Python weekdays (0 is Monday). A "day" rule follows lightcurve's day (04:00 to 04:00); blocked
+hours belong to the weekday it starts on. Time on every device counts, two at once counted once.
 
 Every device keeps them: the phone itself (Limits.kt has the same rules as this file), computers through
 the enforcer, which the server tells what to block (`enforce`). The server stores them, shows them, and makes
@@ -25,10 +22,9 @@ import datetime as dt
 
 from . import core, link
 
-KINDS = ("day", "every", "block", "window", "stretch")
+KINDS = ("day", "block")
 ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
-HORIZON = 25 * 3600  # no rule looks further back than a day; an hour more for a stretch that began before it
-REOPEN = 300  # a rolling limit opens again once this much (or the whole allowance, if smaller) is free
+HORIZON = 25 * 3600  # no rule looks further back than a day
 DEFAULT_UNLOCK = {"hold": 5, "wait": 3, "grant": 10, "per_day": None}
 DEFAULT_SETTINGS = {"changes_wait": 15, "guard": True}
 FRESH = 600  # a limit this new can still be changed at once: it hasn't held anything back yet
@@ -68,21 +64,9 @@ def clean_rule(r):
     k = r["kind"]
     if k == "day":
         return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"), "days": _days(r.get("days"))}
-    if k == "every":
-        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"),
-                "hours": _int(r.get("hours"), 1, 24, "Hours")}
-    if k == "block":
-        # The same time at both ends is the whole day: closed, full stop.
-        a, b = _clock(r.get("from"), "Start time"), _clock(r.get("to"), "End time")
-        return {"kind": k, "from": a, "to": b, "days": _days(r.get("days"))}
-    if k == "window":
-        a, b = _clock(r.get("from"), "Start time"), _clock(r.get("to"), "End time")
-        if a == b:
-            raise ValueError("The start and end times are the same.")
-        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"), "from": a, "to": b,
-                "days": _days(r.get("days"))}
-    return {"kind": k, "minutes": _int(r.get("minutes"), 1, 720, "Minutes"),
-            "rest": _int(r.get("rest"), 1, 720, "Break")}
+    # The same time at both ends is the whole day: blocked, full stop.
+    a, b = _clock(r.get("from"), "Start time"), _clock(r.get("to"), "End time")
+    return {"kind": k, "from": a, "to": b, "days": _days(r.get("days"))}
 
 
 def clean_unlock(u):
@@ -149,12 +133,12 @@ def _minutes(hhmm):
 
 
 def _length(rule):
-    """Minutes a time window lasts. From and to the same time is a whole day."""
+    """Minutes blocked hours last. From and to the same time is a whole day."""
     return (_minutes(rule["to"]) - _minutes(rule["from"])) % 1440 or 1440
 
 
 def _week_minutes(rule):
-    """The minutes of the week a time window covers, Monday 00:00 being 0."""
+    """The minutes of the week blocked hours cover, Monday 00:00 being 0."""
     a = _minutes(rule["from"])
     length = _length(rule)
     return {(d * 1440 + a + i) % 10080 for d in rule["days"] for i in range(length)}
@@ -164,17 +148,9 @@ def _rule_at_least(new, old):
     """Is `new` at least as strict as `old`?"""
     if new["kind"] != old["kind"]:
         return False
-    k = new["kind"]
-    if k == "day":
+    if new["kind"] == "day":
         return new["minutes"] <= old["minutes"] and set(new["days"]) >= set(old["days"])
-    if k == "every":
-        return new["minutes"] <= old["minutes"] and new["hours"] >= old["hours"]
-    if k == "block":
-        return _week_minutes(new) >= _week_minutes(old)
-    if k == "window":
-        return (new["from"], new["to"]) == (old["from"], old["to"]) and new["minutes"] <= old["minutes"] \
-            and set(new["days"]) >= set(old["days"])
-    return new["minutes"] <= old["minutes"] and new["rest"] >= old["rest"]
+    return _week_minutes(new) >= _week_minutes(old)
 
 
 def loosens(old, new):
@@ -206,7 +182,7 @@ def _local(date, hhmm):
 
 
 def _instances(rule, now):
-    """The occurrences of a time window that start between yesterday and tomorrow, as (start, end)."""
+    """The occurrences of blocked hours that start between yesterday and tomorrow, as (start, end)."""
     today = dt.datetime.fromtimestamp(now).date()
     out = []
     for back in (-1, 0, 1):
@@ -216,7 +192,7 @@ def _instances(rule, now):
         a = _local(d, rule["from"])
         e_day = d if _minutes(rule["to"]) > _minutes(rule["from"]) else d + dt.timedelta(days=1)
         out.append((a, _local(e_day, rule["to"])))
-    # A day-long window that runs into the next is one closure: Monday and Tuesday all day ends Wednesday.
+    # Blocked all day running into the next day is one closure: Monday and Tuesday all day ends Wednesday.
     out.sort()
     joined = []
     for a, b in out:
@@ -247,61 +223,20 @@ def _rule_state(rule, usage, now):
         if st["left"] <= 0:
             st["blocked"], st["until"] = True, b
         return st
-    if k == "every":
-        span, allowed = rule["hours"] * 3600, rule["minutes"] * 60
-        recent = core.clip(usage, now - span, now)
-        st["used"], st["allowed"] = core.total(recent), allowed
-        st["left"] = allowed - st["used"]
-        if st["left"] <= 0:
-            if allowed == 0:
-                st["blocked"] = True  # nothing allowed, ever: no reopening time to give
-                return st
-            # Opens again once enough of the oldest time has slid out of the window.
-            need, acc = st["used"] - allowed + min(allowed, REOPEN), 0
-            for a, b in recent:
-                if acc + (b - a) >= need:
-                    st["until"] = a + (need - acc) + span
-                    break
-                acc += b - a
-            st["blocked"] = True
+    # blocked hours
+    st["active"] = False
+    if len(_week_minutes(rule)) == 10080:
+        st["active"] = st["blocked"] = True  # blocked all week: there's no opening time to give
         return st
-    if k == "block":
-        st["active"] = False
-        if len(_week_minutes(rule)) == 10080:
-            st["active"] = st["blocked"] = True  # closed all week: there's no opening time to give
-            return st
-        starts = []
-        for a, b in _instances(rule, now):
-            if a <= now < b:
-                st["active"] = st["blocked"] = True
-                st["until"] = max(st["until"] or 0, b)
-            elif a > now:
-                starts.append(a)
-        if not st["blocked"] and starts:
-            st["left"] = min(starts) - now
-        return st
-    if k == "window":
-        st["active"] = False
-        for a, b in _instances(rule, now):
-            if a <= now < b:
-                st["active"] = True
-                st["used"], st["allowed"] = _used(usage, a, now), rule["minutes"] * 60
-                st["left"] = st["allowed"] - st["used"]
-                if st["left"] <= 0:
-                    st["blocked"], st["until"] = True, b
-        return st
-    # stretch: time joined across breaks shorter than the rest is one stretch
-    rest, allowed = rule["rest"] * 60, rule["minutes"] * 60
-    groups = core.merge(core.clip(usage, now - HORIZON, now), gap=rest)
-    st["allowed"] = allowed
-    if groups and now - groups[-1][1] < rest:
-        g0, g1 = groups[-1]
-        st["used"] = _used(usage, g0, g1)
-        st["left"] = allowed - st["used"]
-        if st["left"] <= 0:
-            st["blocked"], st["until"] = True, g1 + rest
-    else:
-        st["left"] = allowed
+    starts = []
+    for a, b in _instances(rule, now):
+        if a <= now < b:
+            st["active"] = st["blocked"] = True
+            st["until"] = max(st["until"] or 0, b)
+        elif a > now:
+            starts.append(a)
+    if not st["blocked"] and starts:
+        st["left"] = min(starts) - now
     return st
 
 
