@@ -422,7 +422,7 @@ for (const el of [$("#sc-chart")]) {
 
 /* ---- the Limits tab ---- */
 
-const RULE_KINDS = { day: "Time per day", every: "Time per few hours", block: "Blocked hours" };
+const RULE_KINDS = { day: "Time per day", every: "Time per X hours", block: "Blocked hours" };
 const RULE_DEFAULTS = {
   day: { minutes: 60 }, every: { minutes: 30, hours: 4 }, block: { from: "22:00", to: "07:00" },
 };
