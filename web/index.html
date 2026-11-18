@@ -136,13 +136,13 @@
         <h1>Limits</h1>
         <button type="button" class="ghost small lim-new" id="lim-new">+ New limit</button>
       </div>
-      <p class="lim-burn" id="lim-burn" hidden>Burning. No unlocks till it ends.</p>
+      <p class="lim-burn" id="lim-burn" hidden>No unlocks until the burn ends.</p>
       <ul class="limits" id="lim-list"></ul>
       <p class="empty" id="lim-empty" hidden></p>
       <div class="lim-settings" id="lim-settings" hidden>
-        <h2 class="st-h hud-h"><span>Changes</span><span class="st-note" id="lim-set-note"></span></h2>
-        <div class="set-row"><label class="auto" for="lim-wait">Loosening waits</label><input type="number" id="lim-wait" inputmode="numeric" min="0" max="1440"><span>min</span></div>
-        <div class="toggle-row"><span>Lock ignition's settings on the phone<span class="hint inline">its blocker, usage access and uninstall</span></span><label class="switch" aria-label="Lock ignition's settings on the phone"><input type="checkbox" id="lim-guard"><i></i></label></div>
+        <h2 class="st-h hud-h"><span>Loosening</span><span class="st-note" id="lim-set-note"></span></h2>
+        <div class="set-row"><label class="auto" for="lim-wait">Wait before loosening a limit</label><input type="number" id="lim-wait" inputmode="numeric" min="0" max="1440"><span>min</span></div>
+        <div class="toggle-row"><span>Lock ignition's settings on the phone<span class="hint inline">Its blocker, usage access and uninstall</span></span><label class="switch" aria-label="Lock ignition's settings on the phone"><input type="checkbox" id="lim-guard"><i></i></label></div>
         <div class="lim-set-actions" id="lim-set-actions"></div>
       </div>
     </section>
@@ -368,10 +368,10 @@
     <div class="sheet-grip" aria-hidden="true"></div>
     <h2 id="lim-title" tabindex="-1">New limit</h2>
     <input class="lim-name" id="lim-name" placeholder="Name" maxlength="60" aria-label="Name">
-    <h3>What</h3>
-    <div class="chips cats" id="lim-cats" role="group" aria-label="Everything of a kind"></div>
+    <h3>Applies to</h3>
+    <div class="chips cats" id="lim-cats" role="group" aria-label="Categories"></div>
     <ul class="tag-list" id="lim-things"></ul>
-    <form class="tag-add" id="lim-add"><input placeholder="add an app or site" list="lim-known" autocapitalize="off" spellcheck="false" aria-label="Add an app or site"><button type="submit" class="ghost small">Add</button></form>
+    <form class="tag-add" id="lim-add"><input placeholder="Add an app or site" list="lim-known" autocapitalize="off" spellcheck="false" aria-label="Add an app or site"><button type="submit" class="ghost small">Add</button></form>
     <datalist id="lim-known"></datalist>
     <h3>Rules</h3>
     <div class="rules" id="lim-rules"></div>
@@ -379,8 +379,9 @@
     <h3>Unlocking</h3>
     <div class="toggle-row"><span>Allow unlocking</span><label class="switch" aria-label="Allow unlocking"><input type="checkbox" id="lim-unlock-on"><i></i></label></div>
     <div class="unlock-set" id="lim-unlock">
-      <div class="set-row"><label>Hold</label><input type="number" id="lim-hold" inputmode="numeric" min="1" max="60"><span>s, then wait</span><input type="number" id="lim-uwait" inputmode="numeric" min="0" max="240"><span>min</span></div>
-      <div class="set-row"><label>Opens for</label><input type="number" id="lim-grant" inputmode="numeric" min="1" max="240"><span>min,</span><input type="number" id="lim-perday" inputmode="numeric" min="1" max="50" placeholder="any"><span>a day</span></div>
+      <div class="set-row"><label>Hold for</label><input type="number" id="lim-hold" inputmode="numeric" min="1" max="60"><span>s, then wait</span><input type="number" id="lim-uwait" inputmode="numeric" min="0" max="240"><span>min</span></div>
+      <div class="set-row"><label>Unlock for</label><input type="number" id="lim-grant" inputmode="numeric" min="1" max="240"><span>min</span></div>
+      <div class="set-row"><label>Up to</label><input type="number" id="lim-perday" inputmode="numeric" min="1" max="50" placeholder="any"><span>unlocks a day</span></div>
     </div>
     <p class="hint lim-msg" id="lim-msg"></p>
     <div class="sheet-actions" id="lim-actions"></div>

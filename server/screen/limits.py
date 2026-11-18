@@ -58,7 +58,7 @@ def _days(v):
         return list(ALL_DAYS)
     days = sorted({_int(d, 0, 6, "a day") for d in v})
     if not days:
-        raise ValueError("pick at least one day")
+        raise ValueError("Pick at least one day.")
     return days
 
 
@@ -67,22 +67,22 @@ def clean_rule(r):
         raise ValueError("a rule needs a kind: " + ", ".join(KINDS))
     k = r["kind"]
     if k == "day":
-        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "minutes"), "days": _days(r.get("days"))}
+        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"), "days": _days(r.get("days"))}
     if k == "every":
-        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "minutes"),
-                "hours": _int(r.get("hours"), 1, 24, "hours")}
+        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"),
+                "hours": _int(r.get("hours"), 1, 24, "Hours")}
     if k == "block":
         # The same time at both ends is the whole day: closed, full stop.
-        a, b = _clock(r.get("from"), "from"), _clock(r.get("to"), "to")
+        a, b = _clock(r.get("from"), "Start time"), _clock(r.get("to"), "End time")
         return {"kind": k, "from": a, "to": b, "days": _days(r.get("days"))}
     if k == "window":
-        a, b = _clock(r.get("from"), "from"), _clock(r.get("to"), "to")
+        a, b = _clock(r.get("from"), "Start time"), _clock(r.get("to"), "End time")
         if a == b:
-            raise ValueError("from and to are the same time")
-        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "minutes"), "from": a, "to": b,
+            raise ValueError("The start and end times are the same.")
+        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"), "from": a, "to": b,
                 "days": _days(r.get("days"))}
-    return {"kind": k, "minutes": _int(r.get("minutes"), 1, 720, "minutes"),
-            "rest": _int(r.get("rest"), 1, 720, "rest")}
+    return {"kind": k, "minutes": _int(r.get("minutes"), 1, 720, "Minutes"),
+            "rest": _int(r.get("rest"), 1, 720, "Break")}
 
 
 def clean_unlock(u):
@@ -91,9 +91,9 @@ def clean_unlock(u):
     if not isinstance(u, dict):
         raise ValueError("unlock should be an object or null")
     per_day = u.get("per_day")
-    return {"hold": _int(u.get("hold", 5), 1, 60, "hold"), "wait": _int(u.get("wait", 3), 0, 240, "wait"),
-            "grant": _int(u.get("grant", 10), 1, 240, "grant"),
-            "per_day": None if per_day in (None, "", 0) else _int(per_day, 1, 50, "unlocks a day")}
+    return {"hold": _int(u.get("hold", 5), 1, 60, "Hold time"), "wait": _int(u.get("wait", 3), 0, 240, "Wait"),
+            "grant": _int(u.get("grant", 10), 1, 240, "Unlock time"),
+            "per_day": None if per_day in (None, "", 0) else _int(per_day, 1, 50, "Unlocks a day")}
 
 
 def clean_target(t):
@@ -115,12 +115,12 @@ def clean(body):
         if t not in targets:
             targets.append(t)
     if not targets:
-        raise ValueError("pick at least one app, site or kind")
+        raise ValueError("Pick at least one app, site or category.")
     if len(targets) > 60:
         raise ValueError("too many targets")
     rules = [clean_rule(r) for r in (body.get("rules") or [])][:20]
     if not rules:
-        raise ValueError("add at least one rule")
+        raise ValueError("Add at least one rule.")
     lid = str(body.get("id") or "")
     if not re.match(r"^l-[a-z0-9]{4,16}$", lid):
         lid = "l-" + secrets.token_hex(4)
@@ -135,7 +135,7 @@ def clean(body):
 def clean_settings(body, current):
     out = dict(current)
     if "changes_wait" in body:
-        out["changes_wait"] = _int(body["changes_wait"], 0, 24 * 60, "the wait for changes")
+        out["changes_wait"] = _int(body["changes_wait"], 0, 24 * 60, "The wait before loosening")
     if "guard" in body:
         out["guard"] = bool(body["guard"])
     return out
@@ -608,12 +608,12 @@ def open_unlock(db, uid, now=None):
     ms_now = int(now * 1000)
     row = db.execute("SELECT limit_id, ready, at, until FROM unlocks WHERE id = ?", (uid,)).fetchone()
     if not row:
-        raise ValueError("That unlock was started over. Begin again.")
+        raise ValueError("That unlock no longer exists. Start again.")
     lid, ready, at, until = row
     if at is not None:
         return {"at": at, "until": until}
     if ms_now + GRACE < ready:
-        raise ValueError("Not yet.")
+        raise ValueError("You can't unlock it yet.")
     lim = _row(db, lid)
     u = lim.get("unlock")
     if not u:

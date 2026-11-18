@@ -422,7 +422,7 @@ for (const el of [$("#sc-chart")]) {
 
 /* ---- the Limits tab ---- */
 
-const RULE_KINDS = { day: "A day", block: "Closed", window: "Between", every: "In any", stretch: "At a time" };
+const RULE_KINDS = { day: "Daily time", block: "Blocked hours", window: "Time between hours", every: "Time per few hours", stretch: "Breaks" };
 const RULE_DEFAULTS = {
   day: { minutes: 60 }, every: { minutes: 30, hours: 4 }, block: { from: "22:00", to: "07:00" },
   window: { minutes: 20, from: "09:00", to: "17:00" }, stretch: { minutes: 20, rest: 30 },
@@ -442,21 +442,21 @@ function daysText(days) {
 }
 function ruleText(r) {
   const on = daysText(r.days);
-  if (r.kind === "day") return r.minutes ? `${minText(r.minutes)} a day${on}` : `Closed all day${on}`;
-  if (r.kind === "every") return `${minText(r.minutes)} in any ${r.hours} h`;
-  if (r.kind === "block") return r.from === r.to ? `Closed all day${on}` : `Closed ${r.from} to ${r.to}${on}`;
-  if (r.kind === "window") return `${minText(r.minutes)} from ${r.from} to ${r.to}${on}`;
-  return `${minText(r.minutes)} at a time, then ${minText(r.rest)} off`;
+  if (r.kind === "day") return r.minutes ? `Up to ${minText(r.minutes)} a day${on}` : `Blocked all day${on}`;
+  if (r.kind === "every") return `Up to ${minText(r.minutes)} in any ${r.hours === 1 ? "hour" : `${r.hours} hours`}`;
+  if (r.kind === "block") return r.from === r.to ? `Blocked all day${on}` : `Blocked from ${r.from} to ${r.to}${on}`;
+  if (r.kind === "window") return `Up to ${minText(r.minutes)} between ${r.from} and ${r.to}${on}`;
+  return `Up to ${minText(r.minutes)} at a time, then a ${minText(r.rest)} break`;
 }
 const rulesText = (rules) => rules.map((r, i) => { const t = ruleText(r); return i ? t[0].toLowerCase() + t.slice(1) : t; }).join(", ");
 
-/** The answer in words: closed, unlocked, or how much is left. */
+/** The answer in words: blocked, unlocked, or how much is left. */
 function limitStatus(item) {
   const s = item.state, u = item.unlock || {};
   if (u.open_until) return { word: "Unlocked", sub: `until ${whenText(u.open_until)}`, cls: "unlocked" };
-  if (s.blocked) return { word: "Closed", sub: s.until ? `until ${whenText(s.until * 1000)}` : "all the time", cls: "closed" };
-  if (s.left != null) return { word: "Open", sub: `${dur(s.left)} left`, cls: "open" };
-  return { word: "Open", sub: "", cls: "open" };
+  if (s.blocked) return { word: "Blocked", sub: s.until ? `until ${whenText(s.until * 1000)}` : "", cls: "closed" };
+  if (s.left != null) return { word: "Allowed", sub: `${dur(s.left)} left`, cls: "open" };
+  return { word: "Allowed", sub: "", cls: "open" };
 }
 
 function paintLimitsTab() {
@@ -488,7 +488,7 @@ function renderLimits() {
     const tight = item.state.rules.filter((r) => r.active && r.allowed).sort((a, b) => (a.allowed - a.used) - (b.allowed - b.used))[0];
     const bar = tight ? `<span class="lim-bar" title="${esc(`${dur(tight.used)} of ${dur(tight.allowed)}`)}"><i class="${tight.used >= tight.allowed ? "over" : ""}" style="width:${Math.min(100, (tight.used / tight.allowed) * 100)}%"></i></span>
       <span class="lim-used">${dur(tight.used)} of ${dur(tight.allowed)}</span>` : "";
-    const pending = item.pending_at ? `<span class="lim-pending">${item.deleting ? "Goes" : "Changes"} at ${esc(whenText(item.pending_at))}</span>` : "";
+    const pending = item.pending_at ? `<span class="lim-pending">${item.deleting ? "Deleted" : "Changes"} at ${esc(whenText(item.pending_at))}</span>` : "";
     return `<li class="limit ${st.cls}" data-i="${i}">
       <button type="button" class="lim-main" data-edit="${i}" aria-label="${esc(`${item.label}: ${st.word} ${st.sub}. Edit`)}">
         <span class="lim-name">${esc(item.label)}</span>
@@ -509,19 +509,19 @@ function renderLimits() {
 function unlockArea(item, i, burning, now) {
   const l = item.limit, u = item.unlock || {};
   if (!l.unlock || !item.state.blocked || u.open_until || burning) return "";
-  const left = u.left == null ? "" : `${u.left} of ${u.per_day} left today`;
+  const left = u.left == null ? "" : `${u.left} of ${u.per_day} unlocks left today`;
   if (u.left === 0) return `<div class="lim-unlock"><span class="lim-note">No unlocks left today</span></div>`;
   if (u.pending) {
     const ms = u.pending.ready - now;
     if (ms > 0) {
-      return `<div class="lim-unlock"><span class="lim-wait"><b>${fmtClock(ms / 1000)}</b> till you can open it</span>
-        <button type="button" class="ghost small" data-cancel="${i}">Stop</button></div>`;
+      return `<div class="lim-unlock"><span class="lim-wait"><b>${fmtClock(ms / 1000)}</b> until you can unlock it</span>
+        <button type="button" class="ghost small" data-cancel="${i}">Cancel</button></div>`;
     }
-    return `<div class="lim-unlock"><button type="button" class="primary" data-open="${i}">Open for ${minText(l.unlock.grant)}</button><span class="lim-note">${esc(left)}</span></div>`;
+    return `<div class="lim-unlock"><button type="button" class="primary" data-open="${i}">Unlock for ${minText(l.unlock.grant)}</button><span class="lim-note">${esc(left)}</span></div>`;
   }
   const wait = l.unlock.wait ? `, then wait ${minText(l.unlock.wait)}` : "";
   return `<div class="lim-unlock"><button type="button" class="hold-btn" data-hold="${i}" style="--hold:${l.unlock.hold}s"><span class="hold-fill"></span><span class="hold-text">Hold to unlock</span></button>
-    <span class="lim-note">${esc(`Hold ${l.unlock.hold} s${wait}. ${left}`)}</span></div>`;
+    <span class="lim-note">${esc(`Hold for ${l.unlock.hold} s${wait}. ${left}`)}</span></div>`;
 }
 
 /** A button that only acts once it has been held down for `seconds`. Letting go early starts it over. */
@@ -562,7 +562,7 @@ function wireUnlocks() {
     const item = items[Number(b.dataset.open)];
     b.disabled = true;
     const r = await unlockStep(item, { step: "open", id: item.unlock.pending.id });
-    if (r) toast(`${item.label} is open until ${whenText(r.until)}`);
+    if (r) toast(`${item.label} is unlocked until ${whenText(r.until)}`);
   });
   $$("#lim-list [data-cancel]").forEach((b) => b.onclick = () => {
     const item = items[Number(b.dataset.cancel)];
@@ -578,10 +578,10 @@ function renderLimitSettings(L) {
   const w = $("#lim-wait");
   if (document.activeElement !== w && !limSetDirty) w.value = s.changes_wait;
   if (!limSetDirty) $("#lim-guard").checked = !!s.guard;
-  $("#lim-set-note").textContent = L.settings_pending && L.settings_at ? `Changes at ${whenText(L.settings_at)}` : "";
+  $("#lim-set-note").textContent = L.settings_pending && L.settings_at ? `Takes effect at ${whenText(L.settings_at)}` : "";
   const box = $("#lim-set-actions");
   if (!limSetDirty) {
-    box.innerHTML = L.settings_pending ? `<button type="button" class="ghost small" id="lim-set-keep">Keep as it is</button>` : "";
+    box.innerHTML = L.settings_pending ? `<button type="button" class="ghost small" id="lim-set-keep">Cancel change</button>` : "";
     const keep = $("#lim-set-keep");
     if (keep) keep.onclick = async () => { await api("PUT", "/api/limits/settings", { cancel: true }); loadLimits(); };
   }
@@ -595,7 +595,7 @@ async function limSetChanged() {
     const dry = await api("PUT", "/api/limits/settings", { ...limSetBody(), dry: true });
     if (!dry.wait) { await saveLimSettings(); return; }
     box.innerHTML = `<button type="button" class="hold-btn" id="lim-set-save" style="--hold:5s"><span class="hold-fill"></span><span class="hold-text">Hold to save</span></button>
-      <button type="button" class="ghost small" id="lim-set-undo">Undo</button><span class="lim-note">Loosens it, so it waits ${minText(dry.minutes)}</span>`;
+      <button type="button" class="ghost small" id="lim-set-undo">Undo</button><span class="lim-note">This loosens your limits, so it takes effect in ${minText(dry.minutes)}</span>`;
     bindHold($("#lim-set-save"), 5, saveLimSettings);
     $("#lim-set-undo").onclick = () => { limSetDirty = false; renderLimitSettings(lim.data); };
   } catch (e) { toast(e.message); }
@@ -604,7 +604,7 @@ async function saveLimSettings() {
   try {
     const r = await api("PUT", "/api/limits/settings", limSetBody());
     limSetDirty = false;
-    if (r.applied === false) toast(`Changes at ${whenText(r.at)}`);
+    if (r.applied === false) toast(`Takes effect at ${whenText(r.at)}`);
     loadLimits();
   } catch (e) { toast(e.message); }
 }
@@ -628,7 +628,7 @@ async function openLimit(item) {
   draft.labels = draft.labels || {};
   $("#lim-title").textContent = item ? item.label : "New limit";
   $("#lim-name").value = draft.name || "";
-  $("#lim-msg").textContent = item && item.pending_at ? (item.deleting ? `Goes at ${whenText(item.pending_at)}` : `A change waits till ${whenText(item.pending_at)}. Saving replaces it.`) : "";
+  $("#lim-msg").textContent = item && item.pending_at ? (item.deleting ? `Will be deleted at ${whenText(item.pending_at)}` : `A change takes effect at ${whenText(item.pending_at)}. Saving replaces it.`) : "";
   $("#lim-msg").classList.remove("error");
   const u = draft.unlock || { ...DEFAULT_UNLOCK };
   $("#lim-unlock-on").checked = !!draft.unlock;
@@ -688,11 +688,11 @@ function ruleRow(r, i) {
   const time = (k, label) => `<input type="time" data-k="${k}" value="${r[k]}" step="60" aria-label="${label}">`;
   const allDay = r.kind === "block" && r.from === r.to;
   let f = "";
-  if (r.kind === "day") f = `${num("minutes", 0, 1440, "Minutes")}<span>min a day</span>`;
-  if (r.kind === "every") f = `${num("minutes", 0, 1440, "Minutes")}<span>min in any</span>${num("hours", 1, 24, "Hours")}<span>h</span>`;
-  if (r.kind === "block") f = allDay ? `<span>Closed all day</span>` : `<span>Closed</span>${time("from", "From")}<span>to</span>${time("to", "To")}`;
-  if (r.kind === "window") f = `${num("minutes", 0, 1440, "Minutes")}<span>min from</span>${time("from", "From")}<span>to</span>${time("to", "To")}`;
-  if (r.kind === "stretch") f = `${num("minutes", 1, 720, "Minutes at a time")}<span>min at a time, then</span>${num("rest", 1, 720, "Minutes off")}<span>off</span>`;
+  if (r.kind === "day") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min a day</span>`;
+  if (r.kind === "every") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min in any</span>${num("hours", 1, 24, "Hours")}<span>hours</span>`;
+  if (r.kind === "block") f = allDay ? `<span>Blocked all day</span>` : `<span>Blocked from</span>${time("from", "From")}<span>to</span>${time("to", "To")}`;
+  if (r.kind === "window") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min between</span>${time("from", "From")}<span>and</span>${time("to", "To")}`;
+  if (r.kind === "stretch") f = `<span>Up to</span>${num("minutes", 1, 720, "Minutes at a time")}<span>min at a time, then a</span>${num("rest", 1, 720, "Break minutes")}<span>min break</span>`;
   row.innerHTML = `<div class="rule-line">${f}<button type="button" class="tag-x rule-x" aria-label="Remove rule"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button></div>`
     + (r.kind === "block" ? `<div class="toggle-row small"><span>All day</span><label class="switch" aria-label="All day"><input type="checkbox" class="all-day" ${allDay ? "checked" : ""}><i></i></label></div>` : "")
     + (r.days ? `<div class="sched-days">${ALL_DAYS.map((d) => `<button type="button" data-d="${d}" class="${r.days.includes(d) ? "on" : ""}" aria-pressed="${r.days.includes(d)}" aria-label="${LDAYS[d]}">${LDAYS[d][0]}</button>`).join("")}</div>` : "");
@@ -740,7 +740,7 @@ async function limitDone(r) {
 function drawActions() {
   const box = $("#lim-actions");
   box.innerHTML = (editing ? `<button type="button" class="hold-btn danger" id="lim-del" style="--hold:5s"><span class="hold-fill"></span><span class="hold-text">Hold to delete</span></button>` : "")
-    + (editing && editing.pending_at ? `<button type="button" class="ghost" id="lim-keep">Keep as it is</button>` : "")
+    + (editing && editing.pending_at ? `<button type="button" class="ghost" id="lim-keep">Cancel change</button>` : "")
     + `<span class="grow"></span><button type="button" class="ghost" id="lim-close">Close</button><button type="button" class="primary" id="lim-save">Save</button>`;
   $("#lim-close").onclick = () => limitDialog.close();
   const commit = async () => { try { await limitDone(await api("PUT", "/api/limits", limitBody())); } catch (e) { limitFail(e); } };
@@ -754,7 +754,7 @@ function drawActions() {
           bindHold($("#lim-save"), 5, commit);
           const m = $("#lim-msg");
           m.classList.remove("error");
-          m.textContent = `Loosens it, so it waits ${minText(dry.minutes)}`;
+          m.textContent = `This loosens the limit, so it takes effect in ${minText(dry.minutes)}`;
           return;
         }
       }
