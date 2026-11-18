@@ -488,9 +488,9 @@ function renderLimits() {
     const tight = item.state.rules.filter((r) => r.active && r.allowed).sort((a, b) => (a.allowed - a.used) - (b.allowed - b.used))[0];
     const bar = tight ? `<span class="lim-bar" title="${esc(`${dur(tight.used)} of ${dur(tight.allowed)}`)}"><i class="${tight.used >= tight.allowed ? "over" : ""}" style="width:${Math.min(100, (tight.used / tight.allowed) * 100)}%"></i></span>
       <span class="lim-used">${dur(tight.used)} of ${dur(tight.allowed)}</span>` : "";
-    const pending = item.pending_at ? `<span class="lim-pending">${item.deleting ? "Deleted" : "Changes"} at ${esc(whenText(item.pending_at))}</span>` : "";
+    const pending = item.pending_at ? `<span class="lim-pending">${item.deleting ? "Deletes" : "Changes"} at ${esc(whenText(item.pending_at))}</span>` : "";
     return `<li class="limit ${st.cls}" data-i="${i}">
-      <button type="button" class="lim-main" data-edit="${i}" aria-label="${esc(`${item.label}: ${st.word} ${st.sub}. Edit`)}">
+      <button type="button" class="lim-main" data-edit="${i}" aria-label="${esc(`${item.label}: ${[st.word, st.sub].filter(Boolean).join(" ")}. Edit`)}">
         <span class="lim-name">${esc(item.label)}</span>
         <span class="lim-state"><b>${st.word}</b> ${esc(st.sub)}</span>
         <span class="lim-rules">${esc(rulesText(l.rules))}</span>
