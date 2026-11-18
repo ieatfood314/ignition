@@ -422,9 +422,9 @@ for (const el of [$("#sc-chart")]) {
 
 /* ---- the Limits tab ---- */
 
-const RULE_KINDS = { day: "Time per day", block: "Blocked hours" };
+const RULE_KINDS = { day: "Time per day", every: "Time per few hours", block: "Blocked hours" };
 const RULE_DEFAULTS = {
-  day: { minutes: 60 }, block: { from: "22:00", to: "07:00" },
+  day: { minutes: 60 }, every: { minutes: 30, hours: 4 }, block: { from: "22:00", to: "07:00" },
 };
 const DEFAULT_UNLOCK = { hold: 5, wait: 3, grant: 10, per_day: null };
 
@@ -442,6 +442,7 @@ function daysText(days) {
 function ruleText(r) {
   const on = daysText(r.days);
   if (r.kind === "day") return r.minutes ? `Up to ${minText(r.minutes)} a day${on}` : `Blocked all day${on}`;
+  if (r.kind === "every") return `Up to ${minText(r.minutes)} every ${r.hours === 1 ? "hour" : `${r.hours} hours`}`;
   return r.from === r.to ? `Blocked all day${on}` : `Blocked from ${r.from} to ${r.to}${on}`;
 }
 const rulesText = (rules) => rules.map((r, i) => { const t = ruleText(r); return i ? t[0].toLowerCase() + t.slice(1) : t; }).join(", ");
@@ -612,7 +613,7 @@ const limitDialog = $("#limit-dialog");
 let draft = null, editing = null;
 
 function newRule(kind) {
-  return { kind, ...RULE_DEFAULTS[kind], days: [...ALL_DAYS] };
+  return kind === "every" ? { kind, ...RULE_DEFAULTS[kind] } : { kind, ...RULE_DEFAULTS[kind], days: [...ALL_DAYS] };
 }
 
 async function openLimit(item) {
@@ -683,6 +684,7 @@ function ruleRow(r, i) {
   const allDay = r.kind === "block" && r.from === r.to;
   let f = "";
   if (r.kind === "day") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min a day</span>`;
+  if (r.kind === "every") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min every</span>${num("hours", 1, 24, "Hours")}<span>hours</span>`;
   if (r.kind === "block") f = allDay ? `<span>Blocked all day</span>` : `<span>Blocked from</span>${time("from", "From")}<span>to</span>${time("to", "To")}`;
   row.innerHTML = `<div class="rule-line">${f}<button type="button" class="tag-x rule-x" aria-label="Remove rule"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button></div>`
     + (r.kind === "block" ? `<div class="toggle-row small"><span>All day</span><label class="switch" aria-label="All day"><input type="checkbox" class="all-day" ${allDay ? "checked" : ""}><i></i></label></div>` : "")

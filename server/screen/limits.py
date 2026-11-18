@@ -3,6 +3,7 @@
 A limit covers some things (by name, `n:youtube`, or by category, `c:play`) and holds rules:
 
     {"kind": "day",   "minutes": 60, "days": [0..6]}                    up to 60 min a day
+    {"kind": "every", "minutes": 30, "hours": 4}                        up to 30 min in any 4 hours (rolling)
     {"kind": "block", "from": "22:00", "to": "07:00", "days": [...]}    blocked between (from == to: all day)
 
 Days are Python weekdays (0 is Monday). A "day" rule follows lightcurve's day (04:00 to 04:00); blocked
@@ -22,9 +23,10 @@ import datetime as dt
 
 from . import core, link
 
-KINDS = ("day", "block")
+KINDS = ("day", "every", "block")
 ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 HORIZON = 25 * 3600  # no rule looks further back than a day
+REOPEN = 300  # a rolling limit opens again once this much (or the whole allowance, if smaller) is free
 DEFAULT_UNLOCK = {"hold": 5, "wait": 3, "grant": 10, "per_day": None}
 DEFAULT_SETTINGS = {"changes_wait": 15, "guard": True}
 FRESH = 600  # a limit this new can still be changed at once: it hasn't held anything back yet
@@ -64,6 +66,9 @@ def clean_rule(r):
     k = r["kind"]
     if k == "day":
         return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"), "days": _days(r.get("days"))}
+    if k == "every":
+        return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"),
+                "hours": _int(r.get("hours"), 1, 24, "Hours")}
     # The same time at both ends is the whole day: blocked, full stop.
     a, b = _clock(r.get("from"), "Start time"), _clock(r.get("to"), "End time")
     return {"kind": k, "from": a, "to": b, "days": _days(r.get("days"))}
@@ -150,6 +155,8 @@ def _rule_at_least(new, old):
         return False
     if new["kind"] == "day":
         return new["minutes"] <= old["minutes"] and set(new["days"]) >= set(old["days"])
+    if new["kind"] == "every":
+        return new["minutes"] <= old["minutes"] and new["hours"] >= old["hours"]
     return _week_minutes(new) >= _week_minutes(old)
 
 
@@ -222,6 +229,24 @@ def _rule_state(rule, usage, now):
         st["left"] = st["allowed"] - st["used"]
         if st["left"] <= 0:
             st["blocked"], st["until"] = True, b
+        return st
+    if k == "every":
+        span, allowed = rule["hours"] * 3600, rule["minutes"] * 60
+        recent = core.clip(usage, now - span, now)
+        st["used"], st["allowed"] = core.total(recent), allowed
+        st["left"] = allowed - st["used"]
+        if st["left"] <= 0:
+            if allowed == 0:
+                st["blocked"] = True  # nothing allowed, ever: no reopening time to give
+                return st
+            # Opens again once enough of the oldest time has slid out of the window.
+            need, acc = st["used"] - allowed + min(allowed, REOPEN), 0
+            for a, b in recent:
+                if acc + (b - a) >= need:
+                    st["until"] = a + (need - acc) + span
+                    break
+                acc += b - a
+            st["blocked"] = True
         return st
     # blocked hours
     st["active"] = False

@@ -46,6 +46,15 @@ class Rules(unittest.TestCase):
         self.assertFalse(limits.evaluate(l, [], at(MON, 12))["blocked"])
         self.assertTrue(limits.evaluate(l, [], at("2026-03-14", 12))["blocked"])
 
+    def test_rolling_window(self):
+        l = lim({"kind": "every", "minutes": 30, "hours": 4})
+        use = [[at(MON, 8), at(MON, 8, 20)], [at(MON, 10), at(MON, 10, 10)]]
+        s = limits.evaluate(l, use, at(MON, 10, 10))
+        self.assertTrue(s["blocked"])
+        # five minutes have to slide out: 08:05 + 4h
+        self.assertEqual(s["until"], at(MON, 12, 5))
+        self.assertFalse(limits.evaluate(l, use, at(MON, 12, 6))["blocked"])
+
     def test_closed_hours_across_midnight(self):
         l = lim({"kind": "block", "from": "22:00", "to": "07:00"})
         s = limits.evaluate(l, [], at(MON, 23))
@@ -70,7 +79,7 @@ class Rules(unittest.TestCase):
         for bad in ({"targets": [], "rules": [{"kind": "day", "minutes": 5}]},
                     {"targets": ["n:x"], "rules": []},
                     {"targets": ["n:x"], "rules": [{"kind": "block", "from": "25:00", "to": "07:00"}]},
-                    {"targets": ["n:x"], "rules": [{"kind": "every", "minutes": 30, "hours": 4}]},
+                    {"targets": ["n:x"], "rules": [{"kind": "stretch", "minutes": 20, "rest": 30}]},
                     {"targets": ["c:nope"], "rules": [{"kind": "day", "minutes": 5}]}):
             with self.assertRaises(ValueError):
                 limits.clean(bad)

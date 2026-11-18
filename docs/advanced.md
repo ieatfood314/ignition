@@ -180,8 +180,8 @@ browse, watch, play), and counts time on two devices at once only once. Days run
   title itself. It stores spans locally first, so nothing is lost while the server is out of reach. It runs as
   you, so stopping it stops that computer's time from counting (limits already closed still block).
 
-**Limits** live on the server, which evaluates them over every device's time. A rule is either `day`
-(minutes a day) or `block` (blocked between two times; the same time at both ends is all day). The same
+**Limits** live on the server, which evaluates them over every device's time. A rule is `day`
+(minutes a day), `every` (minutes in any N hours, rolling) or `block` (blocked between two times; the same time at both ends is all day). The same
 rules are in `server/screen/limits.py` and the app's `Limits.kt`. Loosening a limit or its settings waits
 `changes_wait` minutes; tightening is immediate.
 

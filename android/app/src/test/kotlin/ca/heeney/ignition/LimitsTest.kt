@@ -39,6 +39,13 @@ class LimitsTest {
         assertTrue(eval(l, emptyList(), at(14, 12)).blocked)
     }
 
+    @Test fun rollingWindow() {
+        val l = lim(Rule("every", minutes = 30, hours = 4))
+        val use = listOf(Iv(at(9, 8), at(9, 8, 20)), Iv(at(9, 10), at(9, 10, 10)))
+        eval(l, use, at(9, 10, 10)).let { assertTrue(it.blocked); assertEquals(at(9, 12, 5), it.until) }
+        assertFalse(eval(l, use, at(9, 12, 6)).blocked)
+    }
+
     @Test fun closedHoursAcrossMidnight() {
         val l = lim(Rule("block", from = "22:00", to = "07:00"))
         eval(l, emptyList(), at(9, 23)).let { assertTrue(it.blocked); assertEquals(at(10, 7), it.until) }

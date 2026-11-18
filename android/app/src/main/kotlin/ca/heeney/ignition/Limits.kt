@@ -22,6 +22,7 @@ data class Iv(val a: Long, val b: Long)
 data class Rule(
     val kind: String,
     val minutes: Int = 0,
+    val hours: Int = 0,
     val from: String = "",
     val to: String = "",
     val days: Set<Int> = ALL_DAYS,
@@ -56,6 +57,8 @@ data class LimitState(val blocked: Boolean, val until: Long?, val left: Long?)
 val ALL_DAYS = setOf(0, 1, 2, 3, 4, 5, 6)
 const val DAY_START_HOUR = 4
 const val HORIZON = 25L * 3600 * 1000
+/** A rolling limit opens again once this much (or the whole allowance, if smaller) is free. */
+const val REOPEN = 300_000L
 private const val MIN = 60_000L
 
 object Limits {
@@ -114,6 +117,21 @@ object Limits {
                 if (weekday(date) !in r.days) return RuleState(false, null, null)
                 val left = r.minutes * MIN - used(usage, dayStart(date, zone), now)
                 return if (left <= 0) RuleState(true, dayStart(date.plusDays(1), zone), null) else RuleState(false, null, left)
+            }
+            "every" -> {
+                val span = r.hours * 3600_000L
+                val allowed = r.minutes * MIN
+                val recent = clip(usage, now - span, now)
+                val usedNow = total(recent)
+                if (usedNow < allowed) return RuleState(false, null, allowed - usedNow)
+                if (allowed == 0L) return RuleState(true, null, null)
+                val need = usedNow - allowed + minOf(allowed, REOPEN)
+                var acc = 0L
+                for (iv in recent) {
+                    if (acc + (iv.b - iv.a) >= need) return RuleState(true, iv.a + (need - acc) + span, null)
+                    acc += iv.b - iv.a
+                }
+                return RuleState(true, null, null)
             }
             "block" -> {
                 if (allWeek(r)) return RuleState(true, null, null) // blocked all week: no opening time to give
@@ -177,7 +195,7 @@ class LimitSnapshot(val limits: List<Limit>, val guard: Boolean, val fetched: Lo
                 for (j in 0 until rs.length()) {
                     val r = rs.getJSONObject(j)
                     val days = r.optJSONArray("days")?.let { d -> (0 until d.length()).map { d.getInt(it) }.toSet() } ?: ALL_DAYS
-                    rules.add(Rule(r.getString("kind"), r.optInt("minutes"), r.optString("from"), r.optString("to"), days))
+                    rules.add(Rule(r.getString("kind"), r.optInt("minutes"), r.optInt("hours"), r.optString("from"), r.optString("to"), days))
                 }
                 val u = l.optJSONObject("unlock")
                 val unlock = u?.let { Unlock(it.optInt("hold", 5), it.optInt("wait", 3), it.optInt("grant", 10),
