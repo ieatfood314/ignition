@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - It notes which site each browser shows (the domain only), so screen time and limits can tell sites apart.
  * - While limits are on, or a burn is, it stands in front of the pages that would switch it off: ignition's
  *   App info, its accessibility and usage access switches, the uninstall dialog and the clock settings.
+ *   The usage access page is let through while that access is off, so it can be turned on.
  *
  * It reads the app in front, a browser's own address bar, and the text of those few Settings pages. Only
  * the domains it notes are kept, and they go only to your own server.
@@ -280,7 +281,10 @@ class BlockerService : AccessibilityService() {
             // The Date & time page doesn't always show its switch to a screen reader; its time zone and
             // 24-hour rows give it away (the System page that links to it has the one, not the other).
             val clock = CLOCK.any { it in words } || ("time zone" in words && "24-hour" in words)
-            if (!clock && ("ignition" !in words || DANGER.none { it in words })) return
+            // The usage access switch is only an escape while it's on. While it's off, that page is where you
+            // turn it on, and without it this phone's time doesn't count at all.
+            val danger = if (Collector.hasAccess(this)) DANGER else DANGER - USAGE
+            if (!clock && ("ignition" !in words || danger.none { it in words })) return
         } finally {
             root.recycle()
         }
@@ -387,10 +391,11 @@ class BlockerService : AccessibilityService() {
             "com.google.android.permissioncontroller", "com.android.permissioncontroller",
         )
         /** Words on the pages that would switch ignition off (App info, its accessibility and usage switches). */
+        private val USAGE = setOf("permit usage", "usage access allows")
         private val DANGER = listOf(
             "uninstall", "force stop", "clear storage", "clear data", "clear cache", "use ignition",
-            "ignition shortcut", "permit usage", "usage access allows", "deactivate",
-        )
+            "ignition shortcut", "deactivate",
+        ) + USAGE
         /** The phone's clock: moved, it would open every limit that goes by the time of day, and end a burn. */
         private val CLOCK = listOf("set time automatically", "automatic date", "use network-provided time", "set date")
 

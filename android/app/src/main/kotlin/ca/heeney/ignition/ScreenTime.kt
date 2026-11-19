@@ -134,7 +134,8 @@ object ScreenSync {
         val error = runCatching { push(ctx, url) }.exceptionOrNull()?.let { it.message ?: it.javaClass.simpleName }
         prefs(ctx).edit().putLong("last_ingest", System.currentTimeMillis()).putString("last_error", error ?: "").apply()
         LimitStore.fetch(ctx)
-        if (error == null) Today.send(ctx, url)
+        // Even when this phone's own time didn't go, so the widget shows what ignition shows.
+        Today.send(ctx, url)
         error
     }
 
@@ -332,7 +333,9 @@ object Http {
 
 /**
  * Hands today's screen time (every screen, two at once counted once) to doppler, whose 2x2 widget shows it.
- * Sent after every good sync, so it's never newer than what the server was just told.
+ * It's the server's own number, the one ignition's Screen page shows, sent after every try at sending this
+ * phone's time. Sending only after a good one left the widget showing the morning's number all day once,
+ * while the phone couldn't send.
  */
 object Today {
     private const val DOPPLER = "ca.heeney.doppler"

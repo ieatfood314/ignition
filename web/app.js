@@ -1150,10 +1150,12 @@ async function loadAppInfo() {
       ? "blocks during burns and when a limit is closed"
       : "needs accessibility access to see which app or site is open";
     const us = appInfo.usage || {};
-    lamp("usage", us.granted ? "on" : "warn");
+    const usErr = us.granted && us.last_error;
+    lamp("usage", us.granted && !usErr ? "on" : "warn");
     $("#usage-btn").textContent = us.granted ? "On" : "Turn on";
     $("#usage-btn").disabled = !!us.granted;
-    $("#usage-state").textContent = us.granted ? "counts this phone's screen time" : "needs usage access to count screen time";
+    $("#usage-state").textContent = usErr ? `can't send screen time: ${us.last_error}`
+      : us.granted ? "counts this phone's screen time" : "needs usage access to count screen time";
     $("#blocker-hint").hidden = !!bl.enabled;
     $("#blocker-hint").textContent = "The blocker is off on this phone, so apps and sites won't be blocked here. Turn it on in Settings › Phone.";
     $("#ring-toggle").checked = !!appInfo.ring.enabled;
