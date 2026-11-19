@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.text.TextUtils
@@ -44,6 +45,10 @@ class BlockerService : AccessibilityService() {
     /** The app in front, as far as limits go. */
     private var front = ""
     private val tick = Runnable { checkLimits() }
+    /** Looks at which app really is in front; see [watchFront]. */
+    private val look = Runnable { watchFront() }
+    private var lastClosed = ""
+    private var lastClosedAt = 0L
     private val warned = HashMap<String, Long>()
     private val lastMark = HashMap<String, String>()
     private var pendingSite: String? = null
@@ -60,6 +65,7 @@ class BlockerService : AccessibilityService() {
         refreshGames(true)
         LimitStore.fetchSoon(this, 0)
         checkForeground()
+        main.postDelayed(look, LOOK_MS)
     }
 
     override fun onDestroy() {
@@ -73,6 +79,12 @@ class BlockerService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val type = event.eventType
+        if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            // Windows came, went or swapped focus: a quick swipe between apps comes only as this.
+            main.removeCallbacks(look)
+            main.postDelayed(look, 100)
+            return
+        }
         if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
         if (pkg in GUARDED) {
@@ -102,6 +114,27 @@ class BlockerService : AccessibilityService() {
         front = pkg
         if (isBrowser(pkg)) noteSite(pkg)
         checkLimits()
+    }
+
+    /**
+     * Swiping along the bottom bar back to an app that was covered or sent home brings it to the front
+     * without a window state event, so [onAccessibilityEvent] alone never sees it come back. This reads the
+     * focused app window instead: when windows change, and every [LOOK_MS] while a limit or burn could block.
+     */
+    private fun watchFront() {
+        main.removeCallbacks(look)
+        try {
+            val power = getSystemService(POWER_SERVICE) as PowerManager
+            if (!power.isInteractive) return
+            if (LimitStore.get(this).limits.isEmpty() && !burning()) return
+            val pkg = foregroundPackage() ?: return
+            if (pkg == front || pkg == "com.android.systemui" || pkg in keyboards) return
+            front = pkg
+            check(pkg)
+            checkLimits()
+        } finally {
+            main.postDelayed(look, LOOK_MS)
+        }
     }
 
     private fun foregroundPackage(): String? {
@@ -216,7 +249,13 @@ class BlockerService : AccessibilityService() {
             Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_PAGE, "limits")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
         )
-        Toast.makeText(this, "${limit.label} is closed.", Toast.LENGTH_SHORT).show()
+        // Swiping back and forth covers it again each time; one toast is enough for that.
+        val now = SystemClock.uptimeMillis()
+        if (limit.id != lastClosed || now - lastClosedAt > 5_000) {
+            Toast.makeText(this, "${limit.label} is closed.", Toast.LENGTH_SHORT).show()
+        }
+        lastClosed = limit.id
+        lastClosedAt = now
     }
 
     /** Notes the site a browser shows, for screen time, and looks at the limits again if it changed. */
@@ -334,6 +373,7 @@ class BlockerService : AccessibilityService() {
 
     companion object {
         const val PACKAGE = "ca.heeney.ignition"
+        private const val LOOK_MS = 1_000L
 
         @Volatile private var instance: BlockerService? = null
         private val main = Handler(Looper.getMainLooper())
