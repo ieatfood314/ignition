@@ -73,7 +73,7 @@ object Logic {
         val ids = (0 until apps.length()).map { apps.getJSONObject(it).optString("id") }.toHashSet()
         val prev = old.optJSONArray("apps") ?: JSONArray()
         for (i in 0 until prev.length()) prev.optJSONObject(i)?.let { if (ids.add(it.optString("id"))) apps.put(it) }
-        out.put("games", new.optBoolean("games") || old.optBoolean("games"))
+        for (key in listOf("games", "pc_games")) out.put(key, new.optBoolean(key) || old.optBoolean(key))
         return out
     }
 
@@ -330,6 +330,7 @@ object Logic {
             }
         }
         return JSONObject().put("sites", sites).put("apps", apps).put("games", b.optBoolean("games")).put("programs", programs)
+            .put("pc_games", b.optBoolean("pc_games"))
     }
 
     fun cleanLaunchWindow(b: JSONObject): JSONObject = JSONObject()

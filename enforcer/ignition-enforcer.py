@@ -16,7 +16,7 @@ programs). While a session is active it:
   * cuts off other local services completely (block_ports), e.g. a self-hosted video server;
   * points blocked sites at 0.0.0.0 in /etc/hosts;
   * kills blocked programs (e.g. topgrade, lutris), and anything they spawned, if started after the
-    session began. Ones already open at liftoff are frozen until it ends instead (and their windows
+    session began; with "every game" on, that includes any game (as for a limit on Play). Ones already open at liftoff are frozen until it ends instead (and their windows
     minimized), so a game resumes where it was; a T-minus warns a minute before liftoff;
   * runs the optional burn/idle hooks (e.g. to recolour RGB lighting).
 With hooks.steps set, the burn hook re-runs each time another 1/steps of the burn is used up, and a
@@ -49,7 +49,7 @@ HOSTS_BEGIN = "# >>> ignition: blocked while burning >>>"
 HOSTS_END = "# <<< ignition <<<"
 ACCENT = "e23a29"
 COUNTDOWN_COLOR = "ff8000"
-GAME = "game"  # the name a running game is blocked under when a limit covers Play
+GAME = "game"  # the name a running game is blocked under (a limit on Play, or a burn blocking every game)
 NO_LIMITS = {"sites": [], "programs": [], "games": False, "limits": []}
 
 # Other domains that belong to a site; subdomains are covered separately.
@@ -141,7 +141,9 @@ class Enforcer:
 
     @property
     def block(self):
-        return sorted(set(self.local_block) | set(self.remote.get("programs") or []))
+        """Program names a burn blocks; GAME stands for every game."""
+        games = [GAME] if self.remote.get("games") else []
+        return sorted(set(self.local_block) | set(self.remote.get("programs") or []) | set(games))
 
     def active(self):
         s = self.session

@@ -747,7 +747,7 @@ function tagEl(label, title, onRemove) {
 // During a burn (or a countdown past scrubbing) the block list only grows; the server enforces it too.
 // Things added since the last save can still come off.
 const blockLocked = () => !!state.ignite.block_locked && !!settingsDoc;
-const lockedBlock = () => (blockLocked() ? settingsDoc.block : { sites: [], programs: [], apps: [], games: false });
+const lockedBlock = () => (blockLocked() ? settingsDoc.block : { sites: [], programs: [], apps: [], games: false, pc_games: false });
 
 let seenTags = null;
 function renderBlock() {
@@ -764,12 +764,14 @@ function renderBlock() {
   $("#block-apps").replaceChildren(...apps.map((a) => tagEl(a.label, a.id, rm(held.apps.some((x) => x.id === a.id), () => { b.apps = b.apps.filter((x) => x.id !== a.id); blockEdited(); }))));
   $("#block-games").checked = b.games;
   $("#block-games").disabled = held.games;
+  $("#block-pc-games").checked = !!b.pc_games;
+  $("#block-pc-games").disabled = !!held.pc_games;
   const flash = (sel, pre, list) => $$(`${sel} li`).forEach((li, i) => { if (fresh.includes(pre + list[i])) li.classList.add("new"); });
   flash("#block-sites", "s:", b.sites);
   flash("#block-programs", "p:", b.programs);
   flash("#block-apps", "a:", apps.map((x) => x.id));
   $("#cnt-sites").textContent = b.sites.length || "";
-  $("#cnt-programs").textContent = b.programs.length || "";
+  $("#cnt-programs").textContent = [b.programs.length || "", b.pc_games ? "games" : ""].filter(Boolean).join(" + ");
   $("#cnt-apps").textContent = [b.apps.length || "", b.games ? "games" : ""].filter(Boolean).join(" + ");
   paintSummaries();
 }
@@ -803,7 +805,8 @@ tagForm($("#block-apps-add"), (v) => {
   if (!editBlock.apps.some((a) => a.id === v)) editBlock.apps.push({ id: v, label: v });
   return true;
 });
-$("#block-games").onchange = (e) => { editBlock.games = e.target.checked; edited(); };
+$("#block-games").onchange = (e) => { editBlock.games = e.target.checked; blockEdited(); };
+$("#block-pc-games").onchange = (e) => { editBlock.pc_games = e.target.checked; blockEdited(); };
 
 async function openAppPicker() {
   if (!installedApps) {
@@ -981,9 +984,10 @@ function paintSummaries() {
     b.programs.length && plural(b.programs.length, "program")].filter(Boolean);
   const count = b.sites.length + b.apps.length + b.programs.length;
   const phoneOff = appInfo && !appInfo.blocker.enabled;
-  if (count || b.games) {
+  const games = b.games || b.pc_games;
+  if (count || games) {
     pill("blocking", phoneOff ? "Fix" : "On", phoneOff ? "warn" : "set");
-    tile("blocking", count ? `${count} blocked${b.games ? " <i>+ every game</i>" : ""}` : "Every game",
+    tile("blocking", count ? `${count} blocked${games ? " <i>+ every game</i>" : ""}` : "Every game",
       phoneOff ? `<b class="warn">Not on this phone: blocker is off</b>` : esc(parts.join(" · ") || "Blocked during every burn"));
   } else {
     pill("blocking", "Off", "off");

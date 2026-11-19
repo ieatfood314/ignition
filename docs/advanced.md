@@ -147,7 +147,9 @@ replies with the current session and the shared block list. The Ignite page show
 - points **blocked sites** at `0.0.0.0` in `/etc/hosts`, along with common subdomains and sister domains. The
   installer turns off DNS-over-HTTPS in Firefox, Zen, Chrome, Chromium and Brave through their policy
   files, because DoH would route around it;
-- kills **blocked programs** and their children if you start them during the burn. One that's already open at
+- kills **blocked programs** and their children if you start them during the burn. With **Every game** on
+  under *Programs on computers*, any game counts: a Windows `.exe` (Wine, Proton) or anything Steam launched,
+  however it was started (a game Lutris hands to Steam runs under Steam, not Lutris). One that's already open at
   liftoff is **paused** instead (`SIGSTOP`, its windows minimized on KDE Plasma) and resumed when the burn
   ends, so a game picks up exactly where it was. Resuming it yourself with `kill -CONT` lasts under a
   second. FUSE servers in the tree (a game's packed filesystem) keep running so nothing touching their mount

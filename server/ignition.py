@@ -45,7 +45,7 @@ DEFAULT_LAUNCH_WINDOW = {
 DEFAULT_SETTINGS = {
     "goals": {"daily": 0, "weekly": 0},
     "schedules": [],
-    "block": {"sites": [], "apps": [], "games": False, "programs": []},
+    "block": {"sites": [], "apps": [], "games": False, "programs": [], "pc_games": False},
     "launch_window": DEFAULT_LAUNCH_WINDOW,
     "end_early_over": END_EARLY_OVER,
 }
@@ -214,7 +214,8 @@ def clean_block(body):
         if PACKAGE_RE.match(pkg) and pkg not in seen:
             seen.add(pkg)
             apps.append({"id": pkg[:200], "label": str(app.get("label") or pkg).strip()[:80]})
-    return {"sites": sites, "apps": apps, "games": bool(body.get("games")), "programs": programs}
+    return {"sites": sites, "apps": apps, "games": bool(body.get("games")), "programs": programs,
+            "pc_games": bool(body.get("pc_games"))}
 
 
 def ratchet_block(old, new):
@@ -224,7 +225,8 @@ def ratchet_block(old, new):
         out[k] += [v for v in old[k] if v not in out[k]]
     ids = {a["id"] for a in new["apps"]}
     out["apps"] = list(new["apps"]) + [a for a in old["apps"] if a["id"] not in ids]
-    out["games"] = new["games"] or old["games"]
+    for k in ("games", "pc_games"):
+        out[k] = new[k] or old[k]
     return out
 
 
@@ -573,7 +575,8 @@ class App:
             (host, now(), status),
         )
         block = self.settings()[0]["block"]
-        out = {**self.ignite_state(), "block": {"sites": block["sites"], "programs": block["programs"]}}
+        out = {**self.ignite_state(), "block": {"sites": block["sites"], "programs": block["programs"],
+                                                    "games": block["pc_games"]}}
         if self.screen:
             # Limits hold on computers too: what's over its limit right now, burn or not.
             out["limit_block"] = self.screen.enforce()

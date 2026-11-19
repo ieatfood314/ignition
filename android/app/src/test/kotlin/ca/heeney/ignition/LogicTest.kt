@@ -100,7 +100,7 @@ class LogicTest {
         val full = JSONObject().put("block", JSONObject()
             .put("sites", JSONArray().put("youtube.com").put("reddit.com"))
             .put("apps", JSONArray().put(JSONObject().put("id", "com.termux").put("label", "Termux")))
-            .put("games", true).put("programs", JSONArray().put("vlc")))
+            .put("games", true).put("pc_games", true).put("programs", JSONArray().put("vlc")))
         s.putSettings(Logic.cleanSettings(full))
         val stripped = Logic.cleanSettings(JSONObject().put("block", JSONObject().put("sites", JSONArray().put("example.com"))))
 
@@ -115,6 +115,7 @@ class LogicTest {
         assertEquals(listOf("example.com", "youtube.com", "reddit.com"), (0 until 3).map { b.getJSONArray("sites").getString(it) })
         assertEquals("com.termux", b.getJSONArray("apps").getJSONObject(0).getString("id"))
         assertTrue(b.getBoolean("games"))
+        assertTrue(b.getBoolean("pc_games"))
         assertEquals("vlc", b.getJSONArray("programs").getString(0))
         assertTrue(Logic.igniteState(s, t + 1).getBoolean("block_locked"))
 
