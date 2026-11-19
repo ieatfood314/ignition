@@ -48,8 +48,11 @@ class BlockerService : AccessibilityService() {
     private val tick = Runnable { checkLimits() }
     /** Looks at which app really is in front; see [watchFront]. */
     private val look = Runnable { watchFront() }
+    /** When [look] is due (uptime), or 0. */
+    private var lookAt = 0L
     private var lastClosed = ""
     private var lastClosedAt = 0L
+    private var lastCovered = ""
     private val warned = HashMap<String, Long>()
     private val lastMark = HashMap<String, String>()
     private var pendingSite: String? = null
@@ -66,7 +69,7 @@ class BlockerService : AccessibilityService() {
         refreshGames(true)
         LimitStore.fetchSoon(this, 0)
         checkForeground()
-        main.postDelayed(look, LOOK_MS)
+        lookIn(LOOK_MS)
     }
 
     override fun onDestroy() {
@@ -82,8 +85,7 @@ class BlockerService : AccessibilityService() {
         val type = event.eventType
         if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             // Windows came, went or swapped focus: a quick swipe between apps comes only as this.
-            main.removeCallbacks(look)
-            main.postDelayed(look, 100)
+            lookIn(100)
             return
         }
         if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
@@ -97,11 +99,11 @@ class BlockerService : AccessibilityService() {
             if (pendingSite == null) main.postDelayed(lookSite, 1000)
             pendingSite = pkg
         }
+        val arrived = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != "com.android.systemui" &&
+            pkg !in keyboards && pkg != front
+        if (arrived) front = pkg
         check(pkg)
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != "com.android.systemui" && pkg !in keyboards && pkg != front) {
-            front = pkg
-            checkLimits()
-        }
+        if (arrived) checkLimits()
     }
 
     /**
@@ -110,10 +112,14 @@ class BlockerService : AccessibilityService() {
      * touched something.
      */
     private fun checkForeground() {
-        val pkg = foregroundPackage() ?: return
-        check(pkg)
+        foregroundPackage()?.let { takeFront(it) }
+    }
+
+    /** [pkg] is in front now: the burn, then the site a browser shows, then the limits. */
+    private fun takeFront(pkg: String) {
         front = pkg
-        if (isBrowser(pkg)) noteSite(pkg)
+        check(pkg) // a burn sends it home, which clears front
+        if (front == pkg && isBrowser(pkg)) noteSite(pkg)
         checkLimits()
     }
 
@@ -124,18 +130,29 @@ class BlockerService : AccessibilityService() {
      */
     private fun watchFront() {
         main.removeCallbacks(look)
+        lookAt = 0L
         try {
             val power = getSystemService(POWER_SERVICE) as PowerManager
             if (!power.isInteractive) return
             if (LimitStore.get(this).limits.isEmpty() && !burning()) return
             val pkg = foregroundPackage() ?: return
             if (pkg == front || pkg == "com.android.systemui" || pkg in keyboards) return
-            front = pkg
-            check(pkg)
-            checkLimits()
+            // Just covered: the Limits page is still on its way, give it a moment before covering again.
+            if (pkg == lastCovered && SystemClock.uptimeMillis() - lastClosedAt < 1_000) return
+            takeFront(pkg)
         } finally {
-            main.postDelayed(look, LOOK_MS)
+            lookIn(LOOK_MS)
         }
+    }
+
+    /** Runs [watchFront] in [ms], unless it's due sooner already: a stream of window changes mustn't put it off. */
+    private fun lookIn(ms: Long) {
+        val now = SystemClock.uptimeMillis()
+        val at = now + ms
+        if (lookAt in now..at) return
+        main.removeCallbacks(look)
+        lookAt = at
+        main.postAtTime(look, at)
     }
 
     private fun foregroundPackage(): String? {
@@ -181,6 +198,8 @@ class BlockerService : AccessibilityService() {
     }
 
     private fun kick(what: String) {
+        // Gone home, or about to be: if it comes back without a window event, the next look sees it again.
+        front = ""
         val now = SystemClock.uptimeMillis()
         if (what == lastKicked && now - lastKick < 1500) return // one window change fires several events
         lastKick = now
@@ -257,6 +276,7 @@ class BlockerService : AccessibilityService() {
         }
         lastClosed = limit.id
         lastClosedAt = now
+        lastCovered = pkg
     }
 
     /** Notes the site a browser shows, for screen time, and looks at the limits again if it changed. */
