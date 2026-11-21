@@ -28,6 +28,7 @@ class Screen:
         self.cache = core.Cache()
         self.ig = ignition
         self._enforce = (0, None)
+        self._first_day = None
 
     # -- importing lightcurve's record --
 
@@ -62,6 +63,7 @@ class Screen:
                 self.db.execute("DETACH DATABASE lc")
         tmp.unlink(missing_ok=True)
         self.cache.drop()
+        self._first_day = None
         return n
 
     # -- ignition, from the inside --
@@ -123,10 +125,12 @@ class Screen:
             return default
 
     def first_day(self):
-        row = self.db.execute("SELECT MIN(start) FROM spans").fetchone()
-        legacy = self.db.execute("SELECT MIN(date) FROM legacy").fetchone()
-        first = core.day_of(row[0] / 1000) if row and row[0] else None
-        return {"spans": first, "legacy": legacy[0] if legacy else None}
+        if self._first_day is None:
+            row = self.db.execute("SELECT MIN(start) FROM spans").fetchone()
+            legacy = self.db.execute("SELECT MIN(date) FROM legacy").fetchone()
+            first = core.day_of(row[0] / 1000) if row and row[0] else None
+            self._first_day = {"spans": first, "legacy": legacy[0] if legacy else None}
+        return self._first_day
 
     def day(self, q):
         burns, test = self.burns(), link.blocked_test(self.block())
@@ -203,6 +207,7 @@ class Screen:
         with self.lock:
             result, touched = core.ingest(self.db, body)
             self.cache.drop(touched)
+            self._first_day = None
         self._enforce = (0, None)
         return result
 
