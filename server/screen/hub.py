@@ -165,7 +165,8 @@ class Screen:
             week = core.range_report(self.db, date, self._days(q, 7), self.cache, burns=burns)
         return {
             "date": date, "lit": day["lit"], "summed": day["summed"], "devices": day["devices"],
-            "categories": day["categories"], "first": day["first"], "last": day["last"],
+            "categories": day["categories"], "category_defs": day["category_defs"],
+            "first": day["first"], "last": day["last"],
             "entities": [{k: e[k] for k in ("label", "cat", "seconds", "sessions", "devices")}
                          for e in day["entities"][:40]],
             "curve": [round(c["lit"], 2) if c else 0 for c in day["curve"]],
@@ -211,6 +212,13 @@ class Screen:
             self.cache.drop()
         self._enforce = (0, None)
         return out
+
+    def save_categories(self, body):
+        with self.lock:
+            defs = core.save_categories(self.db, body.get("categories"))
+            self.cache.drop()
+        self._enforce = (0, None)
+        return {"categories": defs}
 
     def patch_device(self, dev_id, body):
         with self.lock, self.db:
@@ -275,6 +283,9 @@ class Screen:
                 return self.today()
             if r == ["limits"]:
                 return self.limit_report(q)
+            if r == ["categories"]:
+                with self.lock:
+                    return {"categories": core.category_list(self.db)}
             if r == ["limits", "enforce"]:
                 return self.enforce()
             return None
@@ -309,6 +320,8 @@ class Screen:
         if method == "PUT":
             if r == ["category"]:
                 return self.set_category(body())
+            if r == ["categories"]:
+                return self.save_categories(body())
             if r == ["limits", "settings"]:
                 b = body()
                 with with_lock:

@@ -5,13 +5,28 @@
 
 /* ---- shared ---- */
 
-const CATS = ["make", "talk", "other", "browse", "watch", "play"]; // good to bad
-const CAT_NAME = { make: "Make", talk: "Talk", other: "Other", browse: "Browse", watch: "Watch", play: "Play" };
-const CAT_ABOUT = {
-  make: "Writing, building, coding", talk: "Messages, mail, calls", other: "Settings, files, home screen",
-  browse: "Other web pages", watch: "Video, feeds, reading", play: "Games",
-};
+const DEFAULT_CATS = [
+  { id: "make", name: "Make", color: "#ffffff", about: "Writing, building, coding", custom: false },
+  { id: "talk", name: "Talk", color: "#a3a3a3", about: "Messages, mail, calls", custom: false },
+  { id: "other", name: "Other", color: "#575757", about: "Settings, files, home screen", custom: false },
+  { id: "browse", name: "Browse", color: "#6e2219", about: "Other web pages", custom: false },
+  { id: "watch", name: "Watch", color: "#a92e1f", about: "Video, feeds, reading", custom: false },
+  { id: "play", name: "Play", color: "#e23a29", about: "Games", custom: false },
+];
+let CAT_DEFS = DEFAULT_CATS, CATS = [], CAT_NAME = {}, CAT_ABOUT = {}, CAT_COLOR = {};
 const CAT_LETTER = { m: "make", w: "watch", t: "talk", p: "play", b: "browse", o: "other" };
+function setCategories(defs) {
+  if (!Array.isArray(defs) || !defs.length) return;
+  CAT_DEFS = defs;
+  CATS = defs.map((c) => c.id);
+  CAT_NAME = Object.fromEntries(defs.map((c) => [c.id, c.name]));
+  CAT_ABOUT = Object.fromEntries(defs.map((c) => [c.id, c.about || ""]));
+  CAT_COLOR = Object.fromEntries(defs.map((c) => [c.id, c.color]));
+}
+setCategories(DEFAULT_CATS);
+const catName = (c) => CAT_NAME[c] || "Other";
+const catColor = (c) => CAT_COLOR[c] || CAT_COLOR.other || "#575757";
+const catStyle = (c) => `--c:${catColor(c)}`;
 const LDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]; // the server's 0 is Monday
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -36,7 +51,7 @@ function whenText(ms) {
   if (days === 1) return `tomorrow ${hhmm(ms)}`;
   return `${t.toLocaleDateString(undefined, { weekday: "short" })} ${hhmm(ms)}`;
 }
-const keyDot = (cat) => `<i class="key c-${cat}"></i>`;
+const keyDot = (cat) => `<i class="key c-${esc(cat)}" style="${esc(catStyle(cat))}"></i>`;
 
 const sc = {
   view: ["day", "weeks", "apps"].includes(ls.getItem("ignition.scView")) ? ls.getItem("ignition.scView") : "day",
@@ -53,12 +68,13 @@ async function loadScreen(what = "all") {
     const jobs = [];
     if (what !== "range") {
       jobs.push(api("GET", `/api/day?${sc.date ? `date=${sc.date}` : ""}${dev}`).then((d) => {
+        setCategories(d.category_defs);
         sc.day = d;
         if (!sc.date) sc.date = d.date;
         sc.day._byKey = Object.fromEntries((d.entities || []).map((e) => [e.key, e]));
       }));
     }
-    if (what !== "day") jobs.push(api("GET", `/api/range?days=${sc.days}${sc.date ? `&end=${sc.date}` : ""}${dev}`).then((r) => { sc.range = r; }));
+    if (what !== "day") jobs.push(api("GET", `/api/range?days=${sc.days}${sc.date ? `&end=${sc.date}` : ""}${dev}`).then((r) => { setCategories(r.category_defs); sc.range = r; }));
     await Promise.all(jobs);
     sc.error = null;
   } catch (e) {
@@ -70,6 +86,7 @@ async function loadScreen(what = "all") {
 async function loadLimits() {
   try {
     lim.data = await api("GET", "/api/limits");
+    setCategories(lim.data.category_defs);
     lim.error = null;
   } catch (e) {
     lim.error = e.message;
@@ -203,14 +220,15 @@ function dayChart(d, W) {
   hours.forEach((h, i) => {
     const sub = `${clock(d, h.from)} to ${clock(d, h.to)}` + (h.top.length ? ` · ${h.top.map(([l]) => l).join(", ")}` : "");
     out += `<g class="mark" style="--i:${i}" data-tip="${esc(dur(h.lit))}" data-sub="${esc(sub)}"><rect class="hit" x="${i * cw}" y="${top}" width="${cw}" height="${H}"/>`;
-    const sum = CATS.reduce((a, c) => a + (h.cats[c] || 0), 0) || 1;
+    const ordered = [...new Set([...CATS, ...Object.keys(h.cats)])];
+    const sum = ordered.reduce((a, c) => a + (h.cats[c] || 0), 0) || 1;
     let y = base;
     const full = (h.lit / 3600) * H;
-    for (const c of CATS) {
+    for (const c of ordered) {
       const part = ((h.cats[c] || 0) / sum) * full;
       if (part <= 0) continue;
       const hh = Math.max(1, part - (part > 4 ? 1.5 : 0));
-      out += `<rect class="c-${c}" x="${i * cw + gap / 2}" y="${y - part}" width="${Math.max(2, cw - gap)}" height="${hh}" rx="${Math.min(2, hh / 2)}"/>`;
+      out += `<rect class="c-${esc(c)}" style="${esc(catStyle(c))}" x="${i * cw + gap / 2}" y="${y - part}" width="${Math.max(2, cw - gap)}" height="${hh}" rx="${Math.min(2, hh / 2)}"/>`;
       y -= part;
     }
     out += "</g>";
@@ -222,7 +240,7 @@ function dayChart(d, W) {
     out += `<rect class="track" x="0" y="${y}" width="${W}" height="${stripH}" rx="2"/>`;
     for (const [a, b, key] of st.spans) {
       const e = sc.day._byKey[key] || { label: key.slice(2), cat: "other" };
-      out += `<rect class="c-${e.cat} mark" x="${x(a)}" y="${y}" width="${Math.max(0.8, x(b) - x(a))}" height="${stripH}" data-tip="${esc(e.label)}" data-sub="${esc(`${clock(d, a)} to ${clock(d, b)} · ${dur(b - a)}`)}"/>`;
+      out += `<rect class="c-${esc(e.cat)} mark" style="${esc(catStyle(e.cat))}" x="${x(a)}" y="${y}" width="${Math.max(0.8, x(b) - x(a))}" height="${stripH}" data-tip="${esc(e.label)}" data-sub="${esc(`${clock(d, a)} to ${clock(d, b)} · ${dur(b - a)}`)}"/>`;
     }
   });
   if (d.in_progress) { const nx = x(d.now - d.t0); out += `<line class="now" x1="${nx}" x2="${nx}" y1="${top - 4}" y2="${height}"/>`; }
@@ -231,8 +249,9 @@ function dayChart(d, W) {
 
 // Most time first, in words: the colours alone don't say which is which.
 function legend(cats, burns) {
-  const order = CATS.filter((c) => cats && cats[c] > 0).sort((a, b) => cats[b] - cats[a]);
-  $("#sc-legend").innerHTML = order.map((c) => `<span title="${esc(CAT_ABOUT[c])}">${keyDot(c)}${CAT_NAME[c]} <b>${dur(cats[c])}</b></span>`).join("")
+  const order = [...new Set([...CATS, ...Object.keys(cats || {})])].filter((c) => cats && cats[c] > 0)
+    .sort((a, b) => cats[b] - cats[a]);
+  $("#sc-legend").innerHTML = order.map((c) => `<span title="${esc(CAT_ABOUT[c] || catName(c))}">${keyDot(c)}${esc(catName(c))} <b>${dur(cats[c])}</b></span>`).join("")
     + (burns ? `<span><i class="key burn"></i>Burn</span>` : "");
 }
 
@@ -266,9 +285,9 @@ function things(rows, limit, scope) {
   const max = rows[0] ? rows[0].seconds : 1;
   const shown = sc.all ? rows : rows.slice(0, limit);
   $("#sc-count").textContent = rows.length ? String(rows.length) : "";
-  $("#sc-things").innerHTML = shown.map((e, i) => `<li><button type="button" class="thing" data-i="${i}" data-scope="${esc(scope)}" aria-label="${esc(`${e.label}, ${dur(e.seconds)}, ${CAT_NAME[e.cat]}`)}">
+  $("#sc-things").innerHTML = shown.map((e, i) => `<li><button type="button" class="thing" data-i="${i}" data-scope="${esc(scope)}" aria-label="${esc(`${e.label}, ${dur(e.seconds)}, ${catName(e.cat)}`)}">
     <span class="nm">${keyDot(e.cat)}<span class="label">${esc(e.label)}</span>${e.blocked ? `<span class="tag-blocked">Blocked</span>` : ""}</span>
-    <span class="bar"><i class="c-${e.cat}" style="width:${Math.max(1, (e.seconds / max) * 100)}%"></i></span>
+    <span class="bar"><i class="c-${esc(e.cat)}" style="${esc(catStyle(e.cat))};width:${Math.max(1, (e.seconds / max) * 100)}%"></i></span>
     <span class="time">${dur(e.seconds)}</span></button></li>`).join("");
   $("#sc-more").hidden = rows.length <= limit;
   $("#sc-more").textContent = sc.all ? "Show fewer" : `Show all ${rows.length}`;
@@ -286,7 +305,8 @@ $("#sc-things").addEventListener("click", (e) => {
   thingOpen = t;
   $("#thing-title").textContent = t.label;
   $("#thing-sub").textContent = `${dur(t.seconds)}, ${b.dataset.scope}`;
-  $("#thing-cats").innerHTML = CATS.map((c) => `<button type="button" data-cat="${c}" class="${c === t.cat ? "on" : ""}" title="${esc(CAT_ABOUT[c])}">${keyDot(c)}${CAT_NAME[c]}</button>`).join("");
+  $("#thing-cats").innerHTML = CATS.map((c) => `<button type="button" data-cat="${esc(c)}" class="${c === t.cat ? "on" : ""}" title="${esc(CAT_ABOUT[c] || catName(c))}">${keyDot(c)}${esc(catName(c))}</button>`).join("")
+    + `<button type="button" data-cat="">Automatic</button>`;
   thingDialog.showModal();
 });
 $("#thing-cats").addEventListener("click", async (e) => {
@@ -296,12 +316,65 @@ $("#thing-cats").addEventListener("click", async (e) => {
     const r = await api("PUT", "/api/category", { key: thingOpen.key, cat: b.dataset.cat });
     thingDialog.close();
     // Out of a kind a limit covers is a loosening: it waits like one.
-    toast(r.applied === false ? `${thingOpen.label} counts as ${CAT_NAME[b.dataset.cat]} from ${whenText(r.at)}`
-      : `${thingOpen.label} counts as ${CAT_NAME[b.dataset.cat]}`);
+    const name = b.dataset.cat ? catName(b.dataset.cat) : "Automatic";
+    toast(r.applied === false ? `${thingOpen.label} counts as ${name} from ${whenText(r.at)}`
+      : `${thingOpen.label} counts as ${name}`);
     loadScreen();
   } catch (err) { toast(err.message); }
 });
 $("#thing-close").onclick = () => thingDialog.close();
+
+/* ---- custom categories ---- */
+const categoryDialog = $("#category-dialog");
+let categoryDraft = [];
+function openCategories() {
+  categoryDraft = CAT_DEFS.map((c) => ({ id: c.id, name: c.name, color: c.color, custom: c.custom }));
+  $("#category-msg").textContent = "";
+  drawCategories();
+  categoryDialog.showModal();
+}
+function drawCategories() {
+  $("#category-list").innerHTML = categoryDraft.map((c, i) => `<li data-i="${i}">
+    <input type="color" data-field="color" value="${esc(c.color)}" aria-label="${esc(c.name || "New category")} colour">
+    <input type="text" data-field="name" value="${esc(c.name)}" maxlength="32" placeholder="Category name" aria-label="Category name">
+    ${c.custom ? `<button type="button" class="tag-x" data-del="${i}" aria-label="Delete ${esc(c.name || "category")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>` : ""}
+  </li>`).join("");
+}
+$("#sc-categories").onclick = openCategories;
+$("#thing-edit-cats").onclick = () => { thingDialog.close(); openCategories(); };
+$("#category-close").onclick = () => categoryDialog.close();
+$("#category-add").onclick = () => {
+  if (categoryDraft.length >= 32) { $("#category-msg").textContent = "Keep at most 32 categories."; return; }
+  categoryDraft.push({ id: "", name: "", color: "#e23a29", custom: true });
+  $("#category-msg").textContent = "";
+  drawCategories();
+  const inputs = $$("#category-list input[type=text]");
+  inputs[inputs.length - 1].focus();
+};
+$("#category-list").addEventListener("input", (e) => {
+  const row = e.target.closest("li[data-i]"), field = e.target.dataset.field;
+  if (!row || !field) return;
+  categoryDraft[Number(row.dataset.i)][field] = e.target.value;
+});
+$("#category-list").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-del]");
+  if (!b) return;
+  categoryDraft.splice(Number(b.dataset.del), 1);
+  drawCategories();
+});
+$("#category-save").onclick = async () => {
+  const b = $("#category-save");
+  b.disabled = true;
+  try {
+    const r = await api("PUT", "/api/categories", { categories: categoryDraft.map(({ id, name, color }) => ({ id, name, color })) });
+    setCategories(r.categories);
+    categoryDialog.close();
+    toast("Categories saved");
+    loadScreen();
+    loadLimits();
+  } catch (err) { $("#category-msg").textContent = err.message; }
+  finally { b.disabled = false; }
+};
 
 /* ---- weeks: every day as a row, coloured by what each 10 minutes went to ---- */
 function renderWeeks() {
@@ -328,7 +401,7 @@ function renderWeeks() {
   cv.setAttribute("aria-label", `Screen time by time of day, ${r.days} days`);
   const g = cv.getContext("2d");
   g.scale(dpr, dpr);
-  const col = Object.fromEntries(CATS.map((c) => [c, cssVar(`--c-${c}`)]));
+  const col = Object.fromEntries(CATS.map((c) => [c, catColor(c)]));
   const text = "#fff", muted = cssVar("--muted"), faint = cssVar("--faint"), well = cssVar("--surface-2");
   const plotW = W - left - right, maxLit = Math.max(1, ...rows.map((x) => x.lit));
   g.textBaseline = "middle";
@@ -339,7 +412,8 @@ function renderWeeks() {
       const ch = ras.lit[b];
       if (ch === ".") continue;
       g.globalAlpha = 0.35 + 0.65 * ((Number(ch) + 1) / 10);
-      g.fillStyle = col[CAT_LETTER[ras.cat[b]]] || col.other;
+      const cat = ras.cat_ids ? ras.cat_ids[b] : CAT_LETTER[ras.cat[b]];
+      g.fillStyle = col[cat] || catColor(cat);
       g.fillRect(left + b * cw, ry, Math.ceil(cw * 10) / 10 + 0.3, rowH);
     }
     g.globalAlpha = 1;
@@ -394,8 +468,9 @@ function renderAppsView() {
   for (const e of rows) cats[e.cat] = (cats[e.cat] || 0) + e.seconds;
   const host = $("#sc-chart");
   host.hidden = !total;
-  host.innerHTML = total ? `<div class="splitbar" role="img" aria-label="${esc(CATS.filter((c) => cats[c]).map((c) => `${CAT_NAME[c]} ${Math.round((cats[c] / total) * 100)}%`).join(", "))}">`
-    + CATS.filter((c) => cats[c] > 0).map((c) => `<i class="c-${c} mark" style="flex:${cats[c] / total} 1 0" data-tip="${Math.round((cats[c] / total) * 100)}%" data-sub="${CAT_NAME[c]}, ${esc(dur(cats[c]))}"></i>`).join("") + "</div>" : "";
+  const ordered = [...new Set([...CATS, ...Object.keys(cats)])].filter((c) => cats[c] > 0);
+  host.innerHTML = total ? `<div class="splitbar" role="img" aria-label="${esc(ordered.map((c) => `${catName(c)} ${Math.round((cats[c] / total) * 100)}%`).join(", "))}">`
+    + ordered.map((c) => `<i class="c-${esc(c)} mark" style="${esc(catStyle(c))};flex:${cats[c] / total} 1 0" data-tip="${Math.round((cats[c] / total) * 100)}%" data-sub="${esc(catName(c))}, ${esc(dur(cats[c]))}"></i>`).join("") + "</div>" : "";
   legend(cats);
   $("#sc-facts").innerHTML = "";
   things(rows, 15, `${r.days} days`);
@@ -638,7 +713,7 @@ async function openLimit(item) {
 }
 
 function drawTargets() {
-  $("#lim-cats").innerHTML = CATS.map((c) => `<button type="button" data-cat="${c}" class="${draft.targets.includes(`c:${c}`) ? "on" : ""}" title="${esc(CAT_ABOUT[c])}">${keyDot(c)}${CAT_NAME[c]}</button>`).join("");
+  $("#lim-cats").innerHTML = CATS.map((c) => `<button type="button" data-cat="${esc(c)}" class="${draft.targets.includes(`c:${c}`) ? "on" : ""}" title="${esc(CAT_ABOUT[c] || catName(c))}">${keyDot(c)}${esc(catName(c))}</button>`).join("");
   $("#lim-things").innerHTML = draft.targets.filter((t) => t.startsWith("n:")).map((t) =>
     `<li><span class="tag-label">${esc(draft.labels[t] || t.slice(2))}</span><button type="button" class="tag-x" data-t="${esc(t)}" aria-label="Remove ${esc(draft.labels[t] || t.slice(2))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button></li>`).join("");
 }

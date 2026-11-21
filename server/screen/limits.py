@@ -87,14 +87,14 @@ def clean_unlock(u):
 
 def clean_target(t):
     t = str(t or "").strip()
-    if t.startswith("c:") and t[2:] in core.CATEGORIES:
+    if t.startswith("c:") and re.match(r"^c:[a-z][a-z0-9-]{0,63}$", t):
         return t
     if re.match(r"^n:.{1,200}$", t):
         return "n:" + t[2:].lower()
     raise ValueError("a target looks like n:<name> or c:<category>")
 
 
-def clean(body):
+def clean(body, db=None):
     """A limit as it is kept, from what the dashboard sent."""
     if not isinstance(body, dict):
         raise ValueError("expected a limit")
@@ -107,6 +107,9 @@ def clean(body):
         raise ValueError("Pick at least one app, site or category.")
     if len(targets) > 60:
         raise ValueError("too many targets")
+    known = set(core.category_ids(db)) if db is not None else set(core.CATEGORIES)
+    if any(t.startswith("c:") and t[2:] not in known for t in targets):
+        raise ValueError("That category no longer exists.")
     rules = [clean_rule(r) for r in (body.get("rules") or [])][:20]
     if not rules:
         raise ValueError("Add at least one rule.")
@@ -331,7 +334,7 @@ def settle(db, now=None):
 
 
 def _put_category(db, key, cat):
-    if cat in core.CATEGORIES:
+    if cat in core.category_ids(db):
         db.execute("INSERT INTO categories (key, cat) VALUES (?, ?) "
                    "ON CONFLICT(key) DO UPDATE SET cat = excluded.cat", (key, cat))
     else:
@@ -350,7 +353,7 @@ def set_category(db, key, cat, now=None):
         was.add(namer.overrides[key])
     limited = {t[2:] for row in db.execute("SELECT body FROM limits")
                for t in json.loads(row[0])["targets"] if t.startswith("c:")}
-    new = cat if cat in core.CATEGORIES else None
+    new = cat if cat in core.category_ids(db) else None
     waiting = json.loads(core.kv_get(db, "category_pending") or "{}")
     with db:
         if any(c in limited and c != new for c in was):
@@ -378,7 +381,7 @@ def would_wait(db, body, now=None):
     """Would saving this have to wait? For the dashboard, which asks for the hold only then."""
     now = now if now is not None else time.time()
     settle(db, now)
-    new = clean(body)
+    new = clean(body, db)
     row = db.execute("SELECT body, created FROM limits WHERE id = ?", (new["id"],)).fetchone()
     wait = row is not None and int(now * 1000) - row[1] >= FRESH * 1000 and loosens(json.loads(row[0]), new)
     return {"wait": wait, "minutes": settings(db)["changes_wait"] if wait else 0}
@@ -389,7 +392,7 @@ def save(db, body, now=None):
     now = now if now is not None else time.time()
     ms_now = int(now * 1000)
     settle(db, now)
-    new = clean(body)
+    new = clean(body, db)
     row = db.execute("SELECT body, created FROM limits WHERE id = ?", (new["id"],)).fetchone()
     with db:
         if not row:
@@ -478,7 +481,7 @@ def report(db, now=None, device=None):
     for r in listing:
         lim = r["limit"]
         usage = usage_for(lim, spans, namer)
-        item = {**r, "state": evaluate(lim, usage, now), "label": label(lim), "unlock": unlock_state(db, lim, now)}
+        item = {**r, "state": evaluate(lim, usage, now), "label": label(lim, db), "unlock": unlock_state(db, lim, now)}
         if device:
             item["match"] = {
                 "apps": sorted(a for a in apps if matches(lim, namer, a, "")),
@@ -489,18 +492,20 @@ def report(db, now=None, device=None):
         out.append(item)
     s = settings(db)
     pending_s = core.kv_get(db, "limit_settings_pending")
-    return {"limits": out, "settings": s, "now": int(now * 1000),
+    return {"limits": out, "settings": s, "now": int(now * 1000), "category_defs": core.category_list(db),
             "settings_pending": json.loads(pending_s) if pending_s else None,
             "settings_at": int(core.kv_get(db, "limit_settings_at") or 0) or None,
             "day_start_hour": core.DAY_START_HOUR}
 
 
-def label(limit):
+def label(limit, db=None):
     """What a limit is called when it hasn't been named: its targets, as they're shown."""
     if limit["name"]:
         return limit["name"]
     labels = limit.get("labels") or {}
-    names = [t[2:].capitalize() if t.startswith("c:") else labels.get(t) or t[2:] for t in limit["targets"]]
+    cats = {c["id"]: c["name"] for c in core.category_list(db)} if db is not None else {}
+    names = [cats.get(t[2:], t[2:].capitalize()) if t.startswith("c:") else labels.get(t) or t[2:]
+             for t in limit["targets"]]
     return ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
 
 
