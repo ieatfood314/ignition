@@ -702,8 +702,11 @@ input[type="time"] { color-scheme: dark; font-family: var(--mono); font-size: 14
 .screen-today:hover b { color: var(--accent-hi); }
 .tabs a.closed span::after { content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: .2em; }
 
-.sc-nav { display: flex; align-items: center; gap: 6px; margin: -6px 0 14px; font: 12px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.sc-nav { display: flex; align-items: center; gap: 12px; margin: -6px 0 14px; font: 12px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
 .sc-nav #sc-when { min-width: 7.5em; text-align: center; }
+.sc-nav .icon-btn { width: 52px; height: 52px; border: 1px solid var(--line-2); background: var(--surface); }
+.sc-nav .icon-btn svg { width: 26px; height: 26px; }
+.sc-nav .icon-btn:hover { border-color: var(--muted); }
 .sc-nav .icon-btn:disabled { opacity: .25; cursor: default; }
 .sc-nav .seg { margin-left: auto; }
 .screen .hero { margin-bottom: 18px; }

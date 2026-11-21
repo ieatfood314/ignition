@@ -42,29 +42,60 @@ const sc = {
   view: ["day", "weeks", "apps"].includes(ls.getItem("ignition.scView")) ? ls.getItem("ignition.scView") : "day",
   days: [7, 28, 91].includes(Number(ls.getItem("ignition.scDays"))) ? Number(ls.getItem("ignition.scDays")) : 28,
   date: null, device: null, day: null, range: null, devices: null, all: false, error: null, drawnKey: "",
+  dayCache: new Map(),
 };
 const lim = { data: null, error: null };
 
 /* ---- loading ---- */
 
+const scDayKey = (date, device) => `${device || ""}|${date || ""}`;
+const scDayRequests = new Map();
+function fetchDay(date, device = sc.device) {
+  const key = scDayKey(date, device);
+  if (scDayRequests.has(key)) return scDayRequests.get(key);
+  const dev = device ? `&device=${encodeURIComponent(device)}` : "";
+  const request = api("GET", `/api/day?${date ? `date=${date}` : ""}${dev}`).then((d) => {
+    d._byKey = Object.fromEntries((d.entities || []).map((e) => [e.key, e]));
+    sc.dayCache.set(scDayKey(d.date, device), d);
+    return d;
+  }).finally(() => scDayRequests.delete(key));
+  scDayRequests.set(key, request);
+  return request;
+}
+
+function prefetchDays() {
+  if (sc.view !== "day" || !sc.date || !sc.day || sc.day.date !== sc.date || document.hidden) return;
+  for (const date of [shiftDay(sc.date, -1), shiftDay(sc.date, 1)]) {
+    if (date <= sc.day.today && !sc.dayCache.has(scDayKey(date, sc.device))) fetchDay(date).catch(() => {});
+  }
+}
+
 async function loadScreen(what = "all") {
-  const dev = sc.device ? `&device=${encodeURIComponent(sc.device)}` : "";
+  const date = sc.date, device = sc.device;
+  const dev = device ? `&device=${encodeURIComponent(device)}` : "";
+  const cached = what !== "range" && sc.dayCache.get(scDayKey(date, device));
+  if (cached) {
+    sc.day = cached;
+    if (state.page === "screen") renderScreen();
+  }
   try {
     const jobs = [];
     if (what !== "range") {
-      jobs.push(api("GET", `/api/day?${sc.date ? `date=${sc.date}` : ""}${dev}`).then((d) => {
-        sc.day = d;
+      jobs.push(fetchDay(date, device).then((d) => {
+        if (sc.date === date && sc.device === device) sc.day = d;
         if (!sc.date) sc.date = d.date;
-        sc.day._byKey = Object.fromEntries((d.entities || []).map((e) => [e.key, e]));
       }));
     }
-    if (what !== "day") jobs.push(api("GET", `/api/range?days=${sc.days}${sc.date ? `&end=${sc.date}` : ""}${dev}`).then((r) => { sc.range = r; }));
+    if (what !== "day") jobs.push(api("GET", `/api/range?days=${sc.days}${date ? `&end=${date}` : ""}${dev}`).then((r) => {
+      if ((!date || sc.date === date) && sc.device === device) sc.range = r;
+    }));
     await Promise.all(jobs);
     sc.error = null;
   } catch (e) {
     sc.error = e.message;
   }
-  if (state.page === "screen") renderScreen();
+  if (state.page === "screen" && (!date || sc.date === date) && sc.device === device) renderScreen();
+  if (what !== "range") prefetchDays();
 }
 
 async function loadLimits() {
@@ -387,7 +418,7 @@ function renderWeeks() {
     if (!row) return;
     sc.date = row.date; sc.view = "day"; sc.all = false;
     ls.setItem("ignition.scView", "day");
-    loadScreen();
+    loadScreen("day");
   });
   const apps = mergeApps(r.census, r.legacy_apps);
   things(apps, 10, `${r.days} days`);
@@ -415,15 +446,17 @@ $$("#sc-view button").forEach((b) => b.onclick = () => {
   sc.view = b.dataset.view; sc.all = false;
   ls.setItem("ignition.scView", sc.view);
   renderScreen();
-  if (sc.view !== "day" && !sc.range) loadScreen("range");
+  if (sc.view !== "day" && (!sc.range || sc.range.end !== sc.date || sc.range.device !== sc.device || sc.range.days !== sc.days)) {
+    loadScreen("range");
+  }
 });
 $$("#sc-days button").forEach((b) => b.onclick = () => {
   sc.days = Number(b.dataset.days); sc.all = false;
   ls.setItem("ignition.scDays", sc.days);
   loadScreen("range");
 });
-$("#sc-prev").onclick = () => { sc.date = shiftDay(sc.date, -1); sc.all = false; loadScreen(); };
-$("#sc-next").onclick = () => { if (sc.day && sc.date < sc.day.today) { sc.date = shiftDay(sc.date, 1); sc.all = false; loadScreen(); } };
+$("#sc-prev").onclick = () => { sc.date = shiftDay(sc.date, -1); sc.all = false; loadScreen("day"); };
+$("#sc-next").onclick = () => { if (sc.day && sc.date < sc.day.today) { sc.date = shiftDay(sc.date, 1); sc.all = false; loadScreen("day"); } };
 
 function hoverStrip(e) {
   if (e.type === "pointermove" && e.pointerType === "touch") return;
