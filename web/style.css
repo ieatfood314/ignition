@@ -675,12 +675,14 @@ input[type="time"] { color-scheme: dark; font-family: var(--mono); font-size: 14
 
 .chart-tip {
   position: fixed; z-index: 50; transform: translate(-50%, -100%); pointer-events: none;
-  display: grid; gap: 2px; padding: 8px 12px; border-radius: 8px; white-space: nowrap;
+  display: grid; gap: 2px; max-width: min(360px, calc(100vw - 16px)); padding: 8px 12px; border-radius: 8px; white-space: nowrap;
   background: #0b0b0b; border: 1px solid var(--line-2); box-shadow: 0 10px 30px rgba(0, 0, 0, .8);
   font: 11px var(--mono); color: var(--muted);
 }
 .chart-tip.below { transform: translate(-50%, 0); }
+.chart-tip > * { overflow: hidden; text-overflow: ellipsis; }
 .chart-tip b { color: var(--text); font: 600 16px var(--sans); }
+.chart-tip small { color: var(--faint); font: 10.5px var(--mono); }
 
 .burn-log { list-style: none; padding: 0; margin: 0; }
 .burn-log li {
@@ -724,8 +726,10 @@ input[type="time"] { color-scheme: dark; font-family: var(--mono); font-size: 14
 .chart text.name { fill: var(--muted); font-family: var(--sans); font-size: 12px; }
 .chart .mark.hot .hit { fill: rgba(255, 255, 255, .05); }
 .chart rect.mark.hot { stroke: #fff; stroke-width: 1; }
+.chart .span-track { cursor: crosshair; }
+.chart .span-track .mark { pointer-events: none; }
 .sc-chart canvas { display: block; cursor: pointer; }
-.screen.drawn .sc-chart .mark { animation: cellIn .5s ease-out both; animation-delay: calc(var(--i, 0) * 18ms); }
+.screen.drawn .sc-chart .hour, .screen.drawn .sc-chart .mark { animation: cellIn .5s ease-out both; animation-delay: calc(var(--i, 0) * 18ms); }
 .cat-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 16px 0 0; font-size: 13px; color: var(--muted); }
 .cat-legend b { font: 400 11.5px var(--mono); color: var(--text); margin-left: 4px; }
 .splitbar { display: flex; gap: 2px; height: 16px; border-radius: 4px; overflow: hidden; }

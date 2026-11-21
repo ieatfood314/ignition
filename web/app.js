@@ -1519,6 +1519,7 @@ const tip = $("#chart-tip");
 let tipMark = null;
 
 function showTip(mark) {
+  if (tipMark === mark) return;
   if (tipMark) tipMark.classList.remove("hot");
   tipMark = mark;
   mark.classList.add("hot");
@@ -1527,6 +1528,11 @@ function showTip(mark) {
   const span = document.createElement("span");
   span.textContent = mark.dataset.sub;
   tip.replaceChildren(b, span);
+  if (mark.dataset.detail) {
+    const detail = document.createElement("small");
+    detail.textContent = mark.dataset.detail;
+    tip.append(detail);
+  }
   tip.hidden = false;
   const r = mark.getBoundingClientRect();
   const half = tip.offsetWidth / 2;

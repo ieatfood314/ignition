@@ -129,7 +129,7 @@ $("#sc-who").addEventListener("click", (e) => {
 });
 
 const dayTotal = (d) => (d.has_data ? d.lit : 0) + (d.legacy ? d.legacy.seconds : 0);
-const clock = (d, off) => { const t = new Date((d.t0 + off + d.utc_offset) * 1000); return `${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}`; };
+const clock = (d, off, seconds = false) => { const t = new Date((d.t0 + off + d.utc_offset) * 1000); return `${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}${seconds ? `:${pad2(t.getUTCSeconds())}` : ""}`; };
 
 function heroTotal(sec, key) {
   const el = $("#sc-total");
@@ -185,24 +185,23 @@ function dayChart(d, W) {
   for (let hr = 0; hr <= 24; hr += step) {
     out += `<text x="${x(hr * 3600)}" y="${base + 16}" text-anchor="${hr === 0 ? "start" : hr === 24 ? "end" : "middle"}">${clock(d, hr * 3600)}</text>`;
   }
-  // One column an hour, stacked good to bad from the bottom.
+  // One column an hour, stacked good to bad from the bottom. Hover uses the ten-minute bins inside it,
+  // rather than flattening everything that happened in the hour into one card.
   const n = d.curve.length, binS = span / n, per = Math.round(3600 / binS);
   const hours = [];
   for (let i = 0; i < n; i += per) {
-    let lit = 0; const cats = {}, tops = {};
+    let lit = 0; const cats = {};
     for (let j = i; j < Math.min(n, i + per); j++) {
       const c = d.curve[j];
       if (!c) continue;
       lit += c.lit * binS;
       for (const [k, v] of Object.entries(c.cats)) cats[k] = (cats[k] || 0) + v;
-      for (const [label, v] of c.top) tops[label] = (tops[label] || 0) + v;
     }
-    hours.push({ from: i * binS, to: Math.min(n, i + per) * binS, lit: Math.min(lit, 3600), cats, top: Object.entries(tops).sort((a, b) => b[1] - a[1]).slice(0, 3) });
+    hours.push({ lit: Math.min(lit, 3600), cats });
   }
   const cw = W / hours.length, gap = small ? 2 : 5;
   hours.forEach((h, i) => {
-    const sub = `${clock(d, h.from)} to ${clock(d, h.to)}` + (h.top.length ? ` · ${h.top.map(([l]) => l).join(", ")}` : "");
-    out += `<g class="mark" style="--i:${i}" data-tip="${esc(dur(h.lit))}" data-sub="${esc(sub)}"><rect class="hit" x="${i * cw}" y="${top}" width="${cw}" height="${H}"/>`;
+    out += `<g class="hour" style="--i:${i}">`;
     const sum = CATS.reduce((a, c) => a + (h.cats[c] || 0), 0) || 1;
     let y = base;
     const full = (h.lit / 3600) * H;
@@ -214,16 +213,27 @@ function dayChart(d, W) {
       y -= part;
     }
     out += "</g>";
+    for (let j = i * per; j < Math.min(n, (i + 1) * per); j++) {
+      const c = d.curve[j];
+      if (!c) continue;
+      const from = j * binS, to = Math.min(n, j + 1) * binS;
+      const tops = c.top.filter(([, seconds]) => seconds > 0);
+      const [label, seconds] = tops[0] || [CAT_NAME[c.cat] || "Screen time", Math.round(c.lit * binS)];
+      const detail = tops.slice(1).map(([name, secs]) => `${name} · ${dur(secs)}`).join("  ·  ");
+      out += `<g class="mark" data-tip="${esc(`${label} · ${dur(seconds)}`)}" data-sub="${esc(`${clock(d, from)} to ${clock(d, to)}`)}"${detail ? ` data-detail="${esc(detail)}"` : ""}><rect class="hit" x="${x(from)}" y="${top}" width="${x(to) - x(from)}" height="${H}"/></g>`;
+    }
   });
   strips.forEach((st, k) => {
     const y = stripsTop + k * stripGap;
     const dev = (d.devices || []).find((v) => v.id === st.device) || { name: st.device };
     out += `<text class="name" x="0" y="${y - 6}">${esc(dev.name)}</text><text x="${W}" y="${y - 6}" text-anchor="end">${dur(st.seconds)}</text>`;
-    out += `<rect class="track" x="0" y="${y}" width="${W}" height="${stripH}" rx="2"/>`;
+    out += `<g class="span-track"><rect class="track" x="0" y="${y}" width="${W}" height="${stripH}" rx="2"/>`;
     for (const [a, b, key] of st.spans) {
-      const e = sc.day._byKey[key] || { label: key.slice(2), cat: "other" };
-      out += `<rect class="c-${e.cat} mark" x="${x(a)}" y="${y}" width="${Math.max(0.8, x(b) - x(a))}" height="${stripH}" data-tip="${esc(e.label)}" data-sub="${esc(`${clock(d, a)} to ${clock(d, b)} · ${dur(b - a)}`)}"/>`;
+      const e = sc.day._byKey[key] || { label: key.slice(2), cat: "other" }, precise = b - a < 60;
+      const sub = `${clock(d, a, precise)} to ${clock(d, b, precise)} · ${dur(b - a)}`;
+      out += `<rect class="c-${e.cat} mark" x="${x(a)}" y="${y}" width="${Math.max(0.8, x(b) - x(a))}" height="${stripH}" data-a="${x(a)}" data-b="${x(b)}" data-tip="${esc(e.label)}" data-sub="${esc(sub)}"/>`;
     }
+    out += "</g>";
   });
   if (d.in_progress) { const nx = x(d.now - d.t0); out += `<line class="now" x1="${nx}" x2="${nx}" y1="${top - 4}" y2="${height}"/>`; }
   return `<svg viewBox="0 0 ${W} ${height}" width="${W}" height="${height}" role="img" aria-label="Screen time by hour">${out}</svg>`;
@@ -415,8 +425,37 @@ $$("#sc-days button").forEach((b) => b.onclick = () => {
 $("#sc-prev").onclick = () => { sc.date = shiftDay(sc.date, -1); sc.all = false; loadScreen(); };
 $("#sc-next").onclick = () => { if (sc.day && sc.date < sc.day.today) { sc.date = shiftDay(sc.date, 1); sc.all = false; loadScreen(); } };
 
+function hoverStrip(e) {
+  if (e.type === "pointermove" && e.pointerType === "touch") return;
+  const track = e.target.closest(".span-track");
+  if (!track) {
+    if (tipMark && tipMark.closest(".span-track")) hideTip();
+    return;
+  }
+  const svg = track.ownerSVGElement, point = svg.createSVGPoint();
+  point.x = e.clientX; point.y = e.clientY;
+  const matrix = svg.getScreenCTM();
+  if (!matrix) return;
+  const at = point.matrixTransform(matrix.inverse()).x;
+  let best = null, bestDistance = Infinity, bestCenter = Infinity;
+  for (const mark of track.querySelectorAll(".mark[data-a]")) {
+    const a = Number(mark.dataset.a), b = Number(mark.dataset.b);
+    const distance = at < a ? a - at : at > b ? at - b : 0;
+    const center = Math.abs(at - (a + b) / 2);
+    if (distance < bestDistance || (distance === bestDistance && center < bestCenter)) {
+      best = mark; bestDistance = distance; bestCenter = center;
+    }
+  }
+  // Six pixels of grace on either side makes even a one-second sliver easy to hit. Where those
+  // areas overlap, the closest block wins instead of whichever one happened to be drawn last.
+  if (best && bestDistance <= 6) showTip(best);
+  else hideTip();
+}
+
 for (const el of [$("#sc-chart")]) {
   el.addEventListener("pointerover", (e) => { const m = e.target.closest("[data-tip]"); if (m) showTip(m); });
+  el.addEventListener("pointermove", hoverStrip);
+  el.addEventListener("pointerdown", hoverStrip);
   el.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hideTip(); });
 }
 
