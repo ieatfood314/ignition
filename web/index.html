@@ -102,6 +102,7 @@
     <section id="page-screen" class="page" hidden>
       <div class="page-head">
         <h1>Screen</h1>
+        <button type="button" class="ghost small sc-categories" id="sc-categories">Categories</button>
         <div class="seg range" id="sc-view" role="group" aria-label="View">
           <button type="button" data-view="day">Day</button>
           <button type="button" data-view="weeks">Weeks</button>
@@ -394,7 +395,17 @@
     <p class="hint" id="thing-sub"></p>
     <h3>Counts as</h3>
     <div class="chips cats" id="thing-cats"></div>
+    <button type="button" class="ghost small" id="thing-edit-cats">Edit categories</button>
     <div class="sheet-actions"><button type="button" class="ghost" id="thing-close">Close</button></div>
+  </dialog>
+
+  <dialog id="category-dialog" class="sheet category-sheet" aria-labelledby="category-title">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <h2 id="category-title" tabindex="-1">Categories</h2>
+    <ul class="category-list" id="category-list"></ul>
+    <button type="button" class="ghost small" id="category-add">+ New category</button>
+    <p class="hint lim-msg error" id="category-msg"></p>
+    <div class="sheet-actions"><button type="button" class="ghost" id="category-close">Close</button><button type="button" class="primary" id="category-save">Save categories</button></div>
   </dialog>
 
   <div class="toast" id="toast" role="status" hidden></div>

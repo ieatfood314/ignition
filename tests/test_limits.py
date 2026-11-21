@@ -331,6 +331,24 @@ class Kinds(unittest.TestCase):
         r = limits.set_category(self.db, "n:kitty", "play", now=self.t)
         self.assertTrue(r["applied"])
 
+    def test_custom_category_can_be_limited_but_not_deleted_from_a_limit(self):
+        defs = core.save_categories(self.db, [*core.category_list(self.db),
+                                              {"id": "", "name": "Drift", "color": "#ff0000"}])
+        custom = next(c for c in defs if c["name"] == "Drift")
+        self.assertTrue(limits.set_category(self.db, "n:kitty", custom["id"], now=self.t)["applied"])
+        saved = limits.save(self.db, {"targets": ["c:" + custom["id"]],
+                                      "rules": [{"kind": "day", "minutes": 0}]}, now=self.t)
+        self.assertEqual(saved["limit"]["targets"], ["c:" + custom["id"]])
+        report = limits.report(self.db, now=self.t)
+        item = next(i for i in report["limits"] if i["limit"]["id"] == saved["limit"]["id"])
+        self.assertTrue(item["state"]["blocked"])
+        self.assertEqual(item["label"], "Drift")
+        with self.assertRaises(ValueError):
+            core.save_categories(self.db, [c for c in defs if c["id"] != custom["id"]])
+        self.assertTrue(limits.delete(self.db, saved["limit"]["id"], now=self.t)["applied"])
+        core.save_categories(self.db, [c for c in defs if c["id"] != custom["id"]])
+        self.assertEqual(core.Namer(self.db).category("kitty", ""), "make")
+
     def test_calling_a_computer_a_phone_keeps_its_programs(self):
         core.ingest(self.db, {"device": {"id": "pc-1234", "name": "pc", "kind": "desktop", "platform": "Plasma"},
                               "spans": [[int(at(MON, 11) * 1000), int(at(MON, 11, 30) * 1000), "steam", ""]]}, now=self.t)

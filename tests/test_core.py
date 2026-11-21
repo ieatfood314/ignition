@@ -229,6 +229,38 @@ class Reports(Base):
         self.assertNotEqual(before, "make")
         self.assertEqual(core.Namer(self.db).category("zen", "Wikipedia"), "make")
 
+    def test_custom_categories_flow_through_reports(self):
+        a = at("2026-03-10", 9)
+        self.send("desk-1", [(a, a + 600, "claude-desktop", "")], now=a + 700)
+        defs = core.save_categories(self.db, [*core.category_list(self.db),
+                                              {"id": "", "name": "Drift", "color": "#FF0000"}])
+        custom = next(c for c in defs if c["name"] == "Drift")
+        self.assertEqual(custom["color"], "#ff0000")
+        self.assertTrue(custom["custom"])
+        self.db.execute("INSERT INTO categories (key, cat) VALUES ('n:claude', ?)", (custom["id"],))
+        day = core.day_report(self.db, "2026-03-10", now=a + 700)
+        self.assertEqual(day["entities"][0]["cat"], custom["id"])
+        self.assertEqual(day["categories"][custom["id"]], 600)
+        self.assertIn(custom, day["category_defs"])
+        r = core.range_report(self.db, "2026-03-10", 1, now=a + 700)
+        self.assertEqual(r["categories"][custom["id"]], 600)
+        self.assertIn(custom["id"], r["raster"][0]["cat_ids"])
+
+        edited = [{**c, "name": "Red category"} if c["id"] == custom["id"] else c for c in defs]
+        defs = core.save_categories(self.db, edited)
+        self.assertEqual(next(c for c in defs if c["id"] == custom["id"])["name"], "Red category")
+        core.save_categories(self.db, [c for c in defs if c["id"] != custom["id"]])
+        self.assertEqual(core.Namer(self.db).category("claude-desktop", ""), "make")
+
+    def test_category_edits_are_checked(self):
+        rows = core.category_list(self.db)
+        with self.assertRaises(ValueError):
+            core.save_categories(self.db, [{**rows[0], "color": "red"}, *rows[1:]])
+        with self.assertRaises(ValueError):
+            core.save_categories(self.db, [rows[0], {**rows[1], "name": rows[0]["name"]}, *rows[2:]])
+        with self.assertRaises(ValueError):
+            core.save_categories(self.db, rows[1:])
+
     def test_range_rows_and_census(self):
         for i in range(5):
             a = at(core.shift("2026-03-01", i), 10)

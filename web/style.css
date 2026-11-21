@@ -759,6 +759,20 @@ input[type="time"] { color-scheme: dark; font-family: var(--mono); font-size: 14
 .sheet h3 { display: flex; align-items: center; gap: 12px; margin: 22px 0 10px; font: 400 10.5px var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--faint); }
 .sheet h3::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--line-2), transparent); }
 .chips.cats button { display: inline-flex; align-items: center; }
+#thing-edit-cats { margin-top: 12px; }
+#page-screen .page-head { gap: 8px; }
+.page-head .sc-categories { margin-left: auto; align-self: center; }
+.page-head .sc-categories + .range { margin-left: 0; }
+.category-sheet { overflow-y: auto; }
+.category-list { list-style: none; display: grid; gap: 8px; padding: 0; margin: 20px 0 14px; }
+.category-list li { display: grid; grid-template-columns: 34px minmax(0, 1fr) 28px; gap: 10px; align-items: center; }
+.category-list input[type="text"] { min-width: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; }
+.category-list input[type="text"]:focus { outline: none; border-color: var(--accent); }
+.category-list input[type="color"] { width: 34px; height: 34px; padding: 3px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; cursor: pointer; }
+.category-list input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.category-list input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 4px; }
+.category-list input[type="color"]::-moz-color-swatch { border: 0; border-radius: 4px; }
+.category-list .tag-x { width: 28px; height: 28px; }
 
 /* ---------- limits ---------- */
 .page-head .lim-new { margin-left: auto; align-self: center; }
@@ -860,6 +874,8 @@ pre.cmd { white-space: pre-wrap; word-break: break-all; background: var(--surfac
   .burn-log li { grid-template-columns: minmax(0, 6.5em) minmax(0, 1fr) auto; gap: 10px; }
   .tabs a { letter-spacing: .1em; }
   .page-head .range { gap: 2px; }
+  #sc-view button { padding-inline: 9px; }
+  #sc-categories { padding-inline: 9px; letter-spacing: .08em; }
   .thing { grid-template-columns: minmax(0, 1.4fr) minmax(0, .8fr) 4.6em; gap: 10px; }
   .lim-name { font-size: 20px; }
   .lim-state b { font-size: 22px; }

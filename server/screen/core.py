@@ -7,8 +7,10 @@ traced back to the spans it came from.
 """
 
 import datetime as dt
+import json
 import os
 import re
+import secrets
 import sqlite3
 import statistics
 import threading
@@ -24,6 +26,14 @@ BASELINE_DAYS = 28
 MIN_BASELINE = 5  # fewer days of history than this and "usual" isn't claimed
 
 CATEGORIES = ("make", "talk", "other", "browse", "watch", "play")  # good to bad
+CATEGORY_DEFAULTS = (
+    ("make", "Make", "#ffffff", "Writing, building, coding"),
+    ("talk", "Talk", "#a3a3a3", "Messages, mail, calls"),
+    ("other", "Other", "#575757", "Settings, files, home screen"),
+    ("browse", "Browse", "#6e2219", "Other web pages"),
+    ("watch", "Watch", "#a92e1f", "Video, feeds, reading"),
+    ("play", "Play", "#e23a29", "Games"),
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (
@@ -60,6 +70,14 @@ CREATE TABLE IF NOT EXISTS names (
 CREATE TABLE IF NOT EXISTS categories (
     key TEXT PRIMARY KEY,
     cat TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS category_defs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    about TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL,
+    custom INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS legacy (
     device TEXT NOT NULL,
@@ -110,6 +128,9 @@ def open_db(path):
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
     db.executescript(SCHEMA)
+    db.executemany("INSERT OR IGNORE INTO category_defs (id, name, color, about, position, custom) "
+                   "VALUES (?, ?, ?, ?, ?, 0)",
+                   [(id_, name, color, about, i) for i, (id_, name, color, about) in enumerate(CATEGORY_DEFAULTS)])
     db.commit()
     return db
 
@@ -122,6 +143,95 @@ def kv_get(db, key, default=None):
 def kv_set(db, key, value):
     db.execute("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                (key, str(value)))
+
+
+# ---- categories ----
+
+_CATEGORY_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def category_list(db):
+    """Every category in chart order. The six defaults can be renamed and recoloured, but not deleted."""
+    return [{"id": id_, "name": name, "color": color, "about": about, "custom": bool(custom)}
+            for id_, name, color, about, custom in db.execute(
+                "SELECT id, name, color, about, custom FROM category_defs ORDER BY position, id")]
+
+
+def category_ids(db):
+    return [c["id"] for c in category_list(db)]
+
+
+def save_categories(db, rows):
+    """Replace the editable category list, creating ids for new rows and removing omitted custom rows.
+
+    A whole list arrives together so a batch of edits is atomic. Deleting a category targeted by a current
+    or pending limit would loosen that limit, so it is refused instead of slipping around the usual wait.
+    """
+    if not isinstance(rows, list) or not rows or len(rows) > 32:
+        raise ValueError("Keep between 1 and 32 categories.")
+    current = {c["id"]: c for c in category_list(db)}
+    seen, names, cleaned = set(), set(), []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Each category needs a name and colour.")
+        id_ = str(row.get("id") or "")
+        if id_ and id_ not in current:
+            raise ValueError("That category no longer exists. Reload and try again.")
+        name = str(row.get("name") or "").strip()[:32]
+        color = str(row.get("color") or "").lower()
+        if not name:
+            raise ValueError("Every category needs a name.")
+        if not _CATEGORY_COLOR.match(color):
+            raise ValueError("Colours need six hex digits, like #e23a29.")
+        folded = name.casefold()
+        if folded in names:
+            raise ValueError("Category names must be different.")
+        if id_ and id_ in seen:
+            raise ValueError("A category appears twice.")
+        if id_:
+            seen.add(id_)
+        names.add(folded)
+        cleaned.append({"id": id_, "name": name, "color": color})
+    missing = {id_ for id_, c in current.items() if c["custom"] and id_ not in seen}
+    required = {id_ for id_, c in current.items() if not c["custom"]}
+    if not required <= seen:
+        raise ValueError("The default categories can't be deleted.")
+    limited = set()
+    for body, pending in db.execute("SELECT body, pending FROM limits"):
+        for raw in (body, pending):
+            if not raw or raw == "null":
+                continue
+            for target in json.loads(raw).get("targets", []):
+                if target.startswith("c:"):
+                    limited.add(target[2:])
+    blocked = sorted(missing & limited)
+    if blocked:
+        names_ = ", ".join(current[id_]["name"] for id_ in blocked)
+        raise ValueError(f"Remove {names_} from your limits before deleting it.")
+    with db:
+        for i, row in enumerate(cleaned):
+            id_ = row["id"]
+            if not id_:
+                while True:
+                    id_ = "x" + secrets.token_hex(4)
+                    if id_ not in current and id_ not in seen:
+                        break
+                seen.add(id_)
+            old = current.get(id_)
+            db.execute("INSERT INTO category_defs (id, name, color, about, position, custom) VALUES (?, ?, ?, ?, ?, ?) "
+                       "ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color, "
+                       "position = excluded.position",
+                       (id_, row["name"], row["color"], old["about"] if old else "", i, int(old["custom"] if old else True)))
+            row["id"] = id_
+        for id_ in missing:
+            db.execute("DELETE FROM category_defs WHERE id = ?", (id_,))
+            db.execute("DELETE FROM categories WHERE cat = ?", (id_,))
+        waiting = json.loads(kv_get(db, "category_pending") or "{}")
+        for key, (cat, _) in list(waiting.items()):
+            if cat in missing:
+                del waiting[key]
+        kv_set(db, "category_pending", json.dumps(waiting))
+    return category_list(db)
 
 
 # ---- days ----
@@ -555,9 +665,10 @@ class DayData:
         self.lit_seconds = total(self.lit)
         self.summed_seconds = sum(total(iv) for iv in self.device_lit.values())
         self.sittings = merge(self.lit, SITTING_GAP)
-        self.cat_seconds = dict.fromkeys(CATEGORIES, 0.0)
+        self.cat_seconds = dict.fromkeys(category_ids(db), 0.0)
         for _, a, b, app, site in self.spans:
-            self.cat_seconds[namer.category(app, site)] += b - a
+            cat = namer.category(app, site)
+            self.cat_seconds[cat] = self.cat_seconds.get(cat, 0.0) + b - a
         self.legacy = rows or None
 
     @property
@@ -592,8 +703,8 @@ class DayData:
         }
         hours = self.summed_seconds / 3600
         m["switch_rate"] = m["switches"] / hours if hours > 0.25 else None
-        for c in CATEGORIES:
-            m[c] = self.cat_seconds[c]
+        for c, seconds in self.cat_seconds.items():
+            m[c] = seconds
         return m
 
 
@@ -727,6 +838,7 @@ def day_report(db, date, cache=None, now=None, burns=(), blocked=None, device=No
         "last": {"at": round(day.lit[-1][1] - t0)} if day.lit else None,
         "curve": curve, "strips": strips, "entities": entities,
         "categories": {c: round(s) for c, s in day.cat_seconds.items()},
+        "category_defs": category_list(db),
         "devices": [{"id": d["id"], "name": d["name"], "kind": d["kind"],
                      "seconds": round(day.all_device_seconds.get(d["id"], 0))} for d in devs],
         "device": device, "all_seconds": round(day.all_seconds),
@@ -776,13 +888,13 @@ def day_report(db, date, cache=None, now=None, burns=(), blocked=None, device=No
 
 def burn_detail(spans, namer, a, b):
     """What was on screen during [a, b): seconds by category and the biggest non-work things."""
-    cats, leaks, lit = dict.fromkeys(CATEGORIES, 0.0), {}, []
+    cats, leaks, lit = {}, {}, []
     for device, s, e, app, site in spans:
         lo, hi = max(s, a), min(e, b)
         if hi <= lo:
             continue
         cat = namer.category(app, site)
-        cats[cat] += hi - lo
+        cats[cat] = cats.get(cat, 0.0) + hi - lo
         lit.append((lo, hi))
         if cat in ("watch", "play", "browse"):
             label = namer.label(app, site)
@@ -835,9 +947,12 @@ def usual(db, date, day, cache, now, device=None):
     if not out["enough"]:
         return out
     ms = [d.metrics() for d in prior]
+    cat_keys = set(day.cat_seconds)
+    for d in prior:
+        cat_keys.update(d.cat_seconds)
     for k in ("lit", "first", "last", "switches", "switch_rate", "longest_sitting", "pickups", "sittings",
-              *CATEGORIES):
-        v = median([m[k] for m in ms])
+              *sorted(cat_keys)):
+        v = median([m.get(k, 0 if k in cat_keys else None) for m in ms])
         out[k] = round(v, 2) if v is not None else None
     if day.t0 <= now < day.t1:
         offset = now - day.t0
@@ -967,6 +1082,7 @@ def range_report(db, end_date, days, cache=None, now=None, burns=(), blocked=Non
         raster.append({
             "lit": "".join("0123456789"[min(9, int(v / BIN * 9.999))] if v > 0 else "." for v in lit),
             "cat": "".join(max(c, key=c.get)[0] if c else "." for c in cat),
+            "cat_ids": [max(c, key=c.get) if c else None for c in cat],
         })
         if day.has_data:
             wd = row["weekday"]
@@ -1009,6 +1125,7 @@ def range_report(db, end_date, days, cache=None, now=None, burns=(), blocked=Non
     rhythm = [[round(week[wd][h] / week_days[wd] / 60, 1) if week_days[wd] else None for h in range(24)]
               for wd in range(7)]
 
+    cat_keys = set().union(*(r["cats"] for r in rows)) if rows else set()
     out = {
         "end": end_date, "days": days, "dates": dates, "t0": t_start, "utc_offset": utc_offset(t_start + 43200),
         "rows": rows, "raster": raster, "census": census[:150], "rhythm": rhythm,
@@ -1016,7 +1133,8 @@ def range_report(db, end_date, days, cache=None, now=None, burns=(), blocked=Non
         "data_days": len(data_days),
         "lit": sum(r["lit"] for r in rows),
         "average": round(sum(r["lit"] for r in data_days) / len(data_days)) if data_days else 0,
-        "categories": {c: sum(r["cats"][c] for r in rows) for c in CATEGORIES},
+        "categories": {c: sum(r["cats"].get(c, 0) for r in rows) for c in cat_keys},
+        "category_defs": category_list(db),
         "devices": [{"id": d["id"], "name": d["name"], "kind": d["kind"],
                      "seconds": sum(r["devices"].get(d["id"], 0) for r in rows)} for d in devs],
         "pickups": sum(r["pickups"] for r in rows),
@@ -1035,19 +1153,17 @@ def ignition_report(spans, namer, rows, burns, t_start, t_end, now):
     burns = [b for b in burns if b["end"] > t_start and b["start"] < t_end]
     if not burns:
         return {"burns": 0}
-    during = dict.fromkeys(CATEGORIES, 0.0)
-    after = dict.fromkeys(CATEGORIES, 0.0)
-    overall = dict.fromkeys(CATEGORIES, 0.0)
+    during, after, overall = {}, {}, {}
     leaks, burn_seconds, lit_during = {}, 0.0, []
     windows = [(b["start"], min(b["end"], now)) for b in burns]
     rebound = [(b["end"], b["end"] + 1800) for b in burns if not b.get("live") and b["end"] + 1800 <= now]
     for device, s, e, app, site in spans:
         cat = namer.category(app, site)
-        overall[cat] += e - s
+        overall[cat] = overall.get(cat, 0.0) + e - s
         for a, b in windows:
             lo, hi = max(s, a), min(e, b)
             if hi > lo:
-                during[cat] += hi - lo
+                during[cat] = during.get(cat, 0.0) + hi - lo
                 lit_during.append((lo, hi))
                 if cat in ("watch", "play", "browse"):
                     label = namer.label(app, site)
@@ -1055,7 +1171,7 @@ def ignition_report(spans, namer, rows, burns, t_start, t_end, now):
         for a, b in rebound:
             lo, hi = max(s, a), min(e, b)
             if hi > lo:
-                after[cat] += hi - lo
+                after[cat] = after.get(cat, 0.0) + hi - lo
     by_date = {r["date"]: r for r in rows}
     for b in burns:
         burn_seconds += min(b["end"], now) - b["start"]

@@ -30,7 +30,7 @@ const stamp = (data, sent) => {
 
 // In the app, screen time and limits come from the server: the app fetches them off the page's thread
 // and answers through ignitionReply.
-const REMOTE = /^\/api\/(day|range|devices|summary|apps|sites|things|screen|limits|category)(\/|\?|$)/;
+const REMOTE = /^\/api\/(day|range|devices|summary|apps|sites|things|screen|limits|category|categories)(\/|\?|$)/;
 const replies = new Map();
 let replyId = 0;
 window.ignitionReply = (id, text) => {
