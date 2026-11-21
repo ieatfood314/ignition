@@ -86,13 +86,15 @@ function prefetchDays() {
   }
 }
 
+const rangeMatches = (r, date, device, days) => r && r.end === date && r._device === device && r.days === days;
+
 async function loadScreen(what = "all") {
-  const date = sc.date, device = sc.device;
+  const date = sc.date, device = sc.device, days = sc.days;
   const dev = device ? `&device=${encodeURIComponent(device)}` : "";
   const cached = what !== "range" && sc.dayCache.get(scDayKey(date, device));
   if (cached) {
     sc.day = cached;
-    if (state.page === "screen") renderScreen();
+    if (state.page === "screen" && (sc.view === "day" || rangeMatches(sc.range, date, device, days))) renderScreen();
   }
   try {
     const jobs = [];
@@ -102,16 +104,18 @@ async function loadScreen(what = "all") {
         if (!sc.date) sc.date = d.date;
       }));
     }
-    if (what !== "day") jobs.push(api("GET", `/api/range?days=${sc.days}${date ? `&end=${date}` : ""}${dev}`).then((r) => {
+    if (what !== "day") jobs.push(api("GET", `/api/range?days=${days}${date ? `&end=${date}` : ""}${dev}`).then((r) => {
+      r._device = device;
       setCategories(r.category_defs);
-      if ((!date || sc.date === date) && sc.device === device) sc.range = r;
+      if ((!date || sc.date === date) && sc.device === device && sc.days === days) sc.range = r;
     }));
     await Promise.all(jobs);
     sc.error = null;
   } catch (e) {
     sc.error = e.message;
   }
-  if (state.page === "screen" && (!date || sc.date === date) && sc.device === device) renderScreen();
+  if (state.page === "screen" && (!date || sc.date === date) && sc.device === device && (what === "day" || sc.days === days)
+      && (sc.view === "day" || rangeMatches(sc.range, sc.date, sc.device, sc.days))) renderScreen();
   if (what !== "range") prefetchDays();
 }
 
@@ -521,10 +525,8 @@ function renderAppsView() {
 $$("#sc-view button").forEach((b) => b.onclick = () => {
   sc.view = b.dataset.view; sc.all = false;
   ls.setItem("ignition.scView", sc.view);
-  renderScreen();
-  if (sc.view !== "day" && (!sc.range || sc.range.end !== sc.date || sc.range.device !== sc.device || sc.range.days !== sc.days)) {
-    loadScreen("range");
-  }
+  if (sc.view !== "day" && !rangeMatches(sc.range, sc.date, sc.device, sc.days)) loadScreen("range");
+  else renderScreen();
 });
 $$("#sc-days button").forEach((b) => b.onclick = () => {
   sc.days = Number(b.dataset.days); sc.all = false;
