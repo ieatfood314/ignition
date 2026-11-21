@@ -151,7 +151,7 @@ _CATEGORY_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 def category_list(db):
-    """Every category in chart order. The six defaults can be renamed and recoloured, but not deleted."""
+    """Every category in chart order. Defaults and custom categories can all be renamed, recoloured or deleted."""
     return [{"id": id_, "name": name, "color": color, "about": about, "custom": bool(custom)}
             for id_, name, color, about, custom in db.execute(
                 "SELECT id, name, color, about, custom FROM category_defs ORDER BY position, id")]
@@ -162,7 +162,7 @@ def category_ids(db):
 
 
 def save_categories(db, rows):
-    """Replace the editable category list, creating ids for new rows and removing omitted custom rows.
+    """Replace the editable category list, creating ids for new rows and removing omitted rows.
 
     A whole list arrives together so a batch of edits is atomic. Deleting a category targeted by a current
     or pending limit would loosen that limit, so it is refused instead of slipping around the usual wait.
@@ -192,10 +192,7 @@ def save_categories(db, rows):
             seen.add(id_)
         names.add(folded)
         cleaned.append({"id": id_, "name": name, "color": color})
-    missing = {id_ for id_, c in current.items() if c["custom"] and id_ not in seen}
-    required = {id_ for id_, c in current.items() if not c["custom"]}
-    if not required <= seen:
-        raise ValueError("The default categories can't be deleted.")
+    missing = set(current) - seen
     limited = set()
     for body, pending in db.execute("SELECT body, pending FROM limits"):
         for raw in (body, pending):
@@ -499,6 +496,9 @@ class Namer:
     def __init__(self, db):
         self.names = {a: (l, h) for a, l, h in db.execute("SELECT app, label, hint FROM names")}
         self.overrides = dict(db.execute("SELECT key, cat FROM categories"))
+        cats = category_ids(db)
+        self.valid_cats = set(cats)
+        self.fallback = "other" if "other" in cats else (cats[0] if cats else "other")
         self._cache = {}
         self._keys = {}
 
@@ -518,7 +518,8 @@ class Namer:
     def category(self, app, site):
         k = (app, site)
         if k not in self._cache:
-            self._cache[k] = self._category(app, site)
+            cat = self._category(app, site)
+            self._cache[k] = cat if cat in self.valid_cats else self.fallback
         return self._cache[k]
 
     def _category(self, app, site):
@@ -1185,8 +1186,8 @@ def ignition_report(spans, namer, rows, burns, t_start, t_end, now):
         return {
             "days": len(rs),
             "lit": round(median([r["lit"] for r in rs]) or 0),
-            "drift": round(median([r["cats"]["watch"] + r["cats"]["play"] for r in rs]) or 0),
-            "make": round(median([r["cats"]["make"] for r in rs]) or 0),
+            "drift": round(median([r["cats"].get("watch", 0) + r["cats"].get("play", 0) for r in rs]) or 0),
+            "make": round(median([r["cats"].get("make", 0) for r in rs]) or 0),
         }
     return {
         "burns": len(burns), "seconds": round(burn_seconds),

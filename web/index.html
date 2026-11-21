@@ -404,6 +404,13 @@
     <h2 id="category-title" tabindex="-1">Categories</h2>
     <ul class="category-list" id="category-list"></ul>
     <button type="button" class="ghost small" id="category-add">+ New category</button>
+    <details class="category-ai" id="category-ai-settings">
+      <summary>AI classification</summary>
+      <div class="set-row"><label for="category-ai-url">API address</label><input type="url" id="category-ai-url" placeholder="https://api.openai.com/v1" spellcheck="false"></div>
+      <div class="set-row"><label for="category-ai-model">Model</label><input type="text" id="category-ai-model" placeholder="gpt-4.1-mini" spellcheck="false"></div>
+      <div class="set-row"><label for="category-ai-key">API key</label><input type="password" id="category-ai-key" autocomplete="new-password"></div>
+      <p class="hint">OpenAI-compatible API. App and site names go to this provider only when you choose AI assign.</p>
+    </details>
     <p class="hint lim-msg error" id="category-msg"></p>
     <div class="sheet-actions"><button type="button" class="ghost" id="category-close">Close</button><button type="button" class="primary" id="category-save">Save categories</button></div>
   </dialog>

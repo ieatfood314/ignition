@@ -133,9 +133,10 @@ These need a server (a Linux computer running ignition), because they count ever
 
 **Screen** shows where today went: an hour-by-hour chart by category, each device's own strip, your burns
 over the top, and every app and site. *Weeks* and *Apps* look further back. Tap an app to change its category;
-*Categories* lets you rename and recolour the defaults or add your own. Phones count through Android's own
-usage log (allow *Screen time* under ⚙ → This phone); KDE Plasma computers count through a small tracker the
-installer adds.
+*Categories* lets you rename, recolour or delete the defaults and add your own. New categories can optionally
+use an OpenAI-compatible AI provider to assign likely apps and sites; configure it under *Categories → AI
+classification*. Phones count through Android's own usage log (allow *Screen time* under ⚙ → This phone); KDE
+Plasma computers count through a small tracker the installer adds.
 
 **Limits** close something when its time is up, on every device at once. A limit covers apps, sites or a
 whole category, including your custom ones (*Play* covers every game, including ones you install later), with any mix of rules:

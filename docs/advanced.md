@@ -174,8 +174,10 @@ sudo systemctl stop ignition-enforcer
 Every device sends the server **spans**: from when to when an app (and, in a browser, which site) was in
 front. The server keeps them in `ignition.screen.db`, names and sorts them into categories (make, talk, other,
 browse, watch and play by default), and counts time on two devices at once only once. Categories can be renamed,
-recoloured and added to from Screen → Categories; each app and site's category can be changed from its row. Custom
-categories also work as limit targets. Days run from 04:00 to 04:00.
+recoloured, deleted and added to from Screen → Categories; each app and site's category can be changed from its
+row. New categories can use an OpenAI-compatible chat API for one-time assignment of likely apps and sites. This
+sends only their names and current categories, preserves manual assignments, and never sends the API key back to
+the UI. Custom categories also work as limit targets. Days run from 04:00 to 04:00.
 
 - **Phones** read Android's usage log (it needs *usage access*) and send it every few minutes; the blocker
   notes which site each browser shows. Nothing is sent without a server.
@@ -313,7 +315,8 @@ block, launch_window, end_early_over), `GET /api/stats`, `GET /api/burns` (every
 Screen time: `POST /api/ingest` (a device's spans), `GET /api/day` (`date`, `device`), `GET /api/range`
 (`days`, `end`), `GET /api/{summary,apps,sites,things}`, `GET /api/screen/today`, `GET /api/devices`,
 `PATCH /api/devices/<id>` (`name`, `kind`), `PUT /api/category` (`key`, `cat`),
-`GET/PUT /api/categories` (the full editable category list).
+`GET/PUT /api/categories` (the full editable category list), `GET/PUT /api/categories/ai/settings`,
+`POST /api/categories/ai` (`cat`, assigning likely apps and sites through the configured AI provider).
 
 Limits: `GET /api/limits` (`device` adds what that device needs to keep them), `PUT /api/limits` (`dry` to
 ask whether it would wait), `DELETE /api/limits/<id>`, `POST /api/limits/<id>/cancel`, `PUT /api/limits/settings`,

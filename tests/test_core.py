@@ -259,7 +259,16 @@ class Reports(Base):
         with self.assertRaises(ValueError):
             core.save_categories(self.db, [rows[0], {**rows[1], "name": rows[0]["name"]}, *rows[2:]])
         with self.assertRaises(ValueError):
-            core.save_categories(self.db, rows[1:])
+            core.save_categories(self.db, [])
+
+    def test_default_categories_can_be_deleted_with_automatic_fallback(self):
+        self.assertEqual(core.Namer(self.db).category("claude-desktop", ""), "make")
+        rows = core.category_list(self.db)
+        core.save_categories(self.db, [c for c in rows if c["id"] != "make"])
+        self.assertEqual(core.Namer(self.db).category("claude-desktop", ""), "other")
+        rows = core.category_list(self.db)
+        core.save_categories(self.db, [c for c in rows if c["id"] != "other"])
+        self.assertEqual(core.Namer(self.db).category("claude-desktop", ""), "talk")
 
     def test_range_rows_and_census(self):
         for i in range(5):

@@ -341,30 +341,44 @@ def _put_category(db, key, cat):
         db.execute("DELETE FROM categories WHERE key = ?", (key,))
 
 
-def set_category(db, key, cat, now=None):
-    """Put a thing in another kind. Taking it out of a kind a limit covers is a loosening, so it waits like one."""
+def set_category_many(db, changes, now=None):
+    """Apply {key: category} together, with the usual wait when anything leaves a limited category."""
     now = now if now is not None else time.time()
     settle(db, now)
     namer = core.Namer(db)
     since = int((now - _SEEN_DAYS * 86400) * 1000)
     pairs = db.execute("SELECT DISTINCT app, site FROM spans WHERE end > ?", (since,)).fetchall()
-    was = {namer.category(a, s) for a, s in pairs if namer.key(a, s) == key}
-    if key in namer.overrides:
-        was.add(namer.overrides[key])
+    by_key = {}
+    for app, site in pairs:
+        by_key.setdefault(namer.key(app, site), set()).add(namer.category(app, site))
     limited = {t[2:] for row in db.execute("SELECT body FROM limits")
                for t in json.loads(row[0])["targets"] if t.startswith("c:")}
-    new = cat if cat in core.category_ids(db) else None
+    known = set(core.category_ids(db))
     waiting = json.loads(core.kv_get(db, "category_pending") or "{}")
+    at = int(now * 1000) + settings(db)["changes_wait"] * 60_000
+    out = {}
     with db:
-        if any(c in limited and c != new for c in was):
-            at = int(now * 1000) + settings(db)["changes_wait"] * 60_000
-            waiting[key] = [new, at]
-            core.kv_set(db, "category_pending", json.dumps(waiting))
-            return {"ok": True, "key": key, "cat": new, "applied": False, "at": at}
-        waiting.pop(key, None)
+        for key, cat in changes.items():
+            if not re.match(r"^n:.{1,200}$", key):
+                raise ValueError("key must look like n:<name>")
+            new = cat if cat in known else None
+            was = set(by_key.get(key, set()))
+            if key in namer.overrides:
+                was.add(namer.overrides[key])
+            if any(c in limited and c != new for c in was):
+                waiting[key] = [new, at]
+                out[key] = {"ok": True, "key": key, "cat": new, "applied": False, "at": at}
+            else:
+                waiting.pop(key, None)
+                _put_category(db, key, new)
+                out[key] = {"ok": True, "key": key, "cat": new, "applied": True, "at": None}
         core.kv_set(db, "category_pending", json.dumps(waiting))
-        _put_category(db, key, new)
-    return {"ok": True, "key": key, "cat": new, "applied": True, "at": None}
+    return out
+
+
+def set_category(db, key, cat, now=None):
+    """Put a thing in another kind. Taking it out of a kind a limit covers is a loosening, so it waits like one."""
+    return set_category_many(db, {key: cat}, now)[key]
 
 
 def rows(db, now=None):

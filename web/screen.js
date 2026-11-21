@@ -336,18 +336,31 @@ $("#thing-close").onclick = () => thingDialog.close();
 
 /* ---- custom categories ---- */
 const categoryDialog = $("#category-dialog");
-let categoryDraft = [];
+let categoryDraft = [], categoryAI = { has_key: false }, categoryAIDirty = false, categoryAIReady = null;
 function openCategories() {
-  categoryDraft = CAT_DEFS.map((c) => ({ id: c.id, name: c.name, color: c.color, custom: c.custom }));
+  categoryDraft = CAT_DEFS.map((c) => ({ id: c.id, name: c.name, color: c.color, custom: c.custom, ai: false }));
+  categoryAIDirty = false;
   $("#category-msg").textContent = "";
+  $("#category-ai-key").value = "";
   drawCategories();
   categoryDialog.showModal();
+  categoryAIReady = loadCategoryAI();
+}
+async function loadCategoryAI() {
+  try {
+    categoryAI = await api("GET", "/api/categories/ai/settings");
+    if (categoryAIDirty) return;
+    $("#category-ai-url").value = categoryAI.url;
+    $("#category-ai-model").value = categoryAI.model;
+    $("#category-ai-key").placeholder = categoryAI.has_key ? "Saved key (leave blank to keep)" : "API key";
+  } catch { categoryAI = { has_key: false }; }
 }
 function drawCategories() {
   $("#category-list").innerHTML = categoryDraft.map((c, i) => `<li data-i="${i}">
     <input type="color" data-field="color" value="${esc(c.color)}" aria-label="${esc(c.name || "New category")} colour">
     <input type="text" data-field="name" value="${esc(c.name)}" maxlength="32" placeholder="Category name" aria-label="Category name">
-    ${c.custom ? `<button type="button" class="tag-x" data-del="${i}" aria-label="Delete ${esc(c.name || "category")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>` : ""}
+    ${categoryDraft.length > 1 ? `<button type="button" class="tag-x" data-del="${i}" aria-label="Delete ${esc(c.name || "category")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>` : ""}
+    ${c.custom ? `<label class="category-ai-choice"><input type="checkbox" data-field="ai" ${c.ai ? "checked" : ""}> AI assign apps and sites</label>` : ""}
   </li>`).join("");
 }
 $("#sc-categories").onclick = openCategories;
@@ -364,8 +377,11 @@ $("#category-add").onclick = () => {
 $("#category-list").addEventListener("input", (e) => {
   const row = e.target.closest("li[data-i]"), field = e.target.dataset.field;
   if (!row || !field) return;
-  categoryDraft[Number(row.dataset.i)][field] = e.target.value;
+  categoryDraft[Number(row.dataset.i)][field] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
 });
+for (const id of ["#category-ai-url", "#category-ai-model", "#category-ai-key"]) {
+  $(id).addEventListener("input", () => { categoryAIDirty = true; });
+}
 $("#category-list").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-del]");
   if (!b) return;
@@ -373,17 +389,43 @@ $("#category-list").addEventListener("click", (e) => {
   drawCategories();
 });
 $("#category-save").onclick = async () => {
-  const b = $("#category-save");
+  const b = $("#category-save"), aiNames = categoryDraft.filter((c) => c.custom && c.ai).map((c) => c.name.trim());
   b.disabled = true;
+  $("#category-msg").textContent = "";
   try {
+    if (aiNames.length && categoryAIReady) await categoryAIReady;
+    if (categoryAIDirty || aiNames.length) {
+      categoryAI = await api("PUT", "/api/categories/ai/settings", {
+        url: $("#category-ai-url").value.trim(), model: $("#category-ai-model").value.trim(),
+        api_key: $("#category-ai-key").value,
+      });
+      categoryAIDirty = false;
+    }
     const r = await api("PUT", "/api/categories", { categories: categoryDraft.map(({ id, name, color }) => ({ id, name, color })) });
     setCategories(r.categories);
-    categoryDialog.close();
-    toast("Categories saved");
+    categoryDraft = r.categories.map((c) => ({ ...c, ai: false }));
+    let assigned = 0, pending = 0; const failures = [];
+    for (const name of aiNames) {
+      const cat = r.categories.find((c) => c.custom && c.name === name);
+      if (!cat) continue;
+      b.textContent = "AI assigning…";
+      try {
+        const result = await api("POST", "/api/categories/ai", { cat: cat.id });
+        assigned += result.assigned;
+        pending += result.pending;
+      } catch (err) { failures.push(`${name}: ${err.message}`); }
+    }
+    drawCategories();
     loadScreen();
     loadLimits();
+    if (failures.length) {
+      $("#category-msg").textContent = `Categories saved. ${failures.join(" ")}`;
+    } else {
+      categoryDialog.close();
+      toast(aiNames.length ? `Categories saved · ${assigned} assigned${pending ? ` · ${pending} waiting` : ""}` : "Categories saved");
+    }
   } catch (err) { $("#category-msg").textContent = err.message; }
-  finally { b.disabled = false; }
+  finally { b.disabled = false; b.textContent = "Save categories"; }
 };
 
 /* ---- weeks: every day as a row, coloured by what each 10 minutes went to ---- */

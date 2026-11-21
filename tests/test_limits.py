@@ -325,6 +325,11 @@ class Kinds(unittest.TestCase):
         self.assertTrue(limits.settle(self.db, now=self.t + 15 * 60 + 1))
         self.assertFalse(self.closed(self.t + 15 * 60 + 2))
 
+    def test_default_category_used_by_a_limit_cannot_be_deleted(self):
+        rows = core.category_list(self.db)
+        with self.assertRaises(ValueError):
+            core.save_categories(self.db, [c for c in rows if c["id"] != "watch"])
+
     def test_into_a_limited_kind_is_at_once(self):
         limits.save(self.db, {"targets": ["c:play"], "rules": [{"kind": "day", "minutes": 0}]}, now=self.t)
         self.assertTrue(limits.set_category(self.db, "n:youtube", "play", now=self.t)["applied"] is False)
