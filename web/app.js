@@ -161,11 +161,8 @@ function setIgnite(s, quiet) {
   state.stopping = false;
   renderIgnite();
   if (state.page === "settings") paintSummaries(); // the goal gauges and the board follow the burns
-  if (state.page === "settings" && editBlock && !!was.block_locked !== !!s.block_locked) {
-    renderBlock();
-    fillEndEarly();
-    if (settingsPage === "apps" && installedApps) renderAppPicker();
-  }
+  if (["settings", "limits"].includes(state.page) && !!was.block_locked !== !!s.block_locked) fillEndEarly();
+  if (state.page === "limits" && was.phase !== s.phase) loadLimits();
 }
 
 async function loadIgnite() {
@@ -566,8 +563,9 @@ async function loadSettings() {
     state.settings = s;
     renderIgnite();
     if (state.page === "stats") renderStats(); // the goal line
+    if (!settingsDoc) fillSettings(s);
     // Changed on another device while Settings is open: show it, unless you're typing here.
-    const typing = document.activeElement?.matches("#page-settings input, #page-settings textarea");
+    const typing = document.activeElement?.matches("#page-settings input, #page-settings textarea, #end-early");
     if (state.page === "settings" && settingsDoc && !saveTimer && !typing && stable(s) !== stable(settingsDoc)) fillSettings(s);
   } catch (e) { console.error(e); }
 }
@@ -640,8 +638,7 @@ const settingsEl = $("#page-settings");
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 let appInfo = null;
 let settingsDoc = null;   // the shared settings document as last loaded or saved
-let editBlock = null;     // the block lists being edited
-let installedApps = null;
+const blockLocked = () => !!state.ignite.block_locked && !!settingsDoc;
 let settingsPage = "home";
 
 const fmtHm = (hm) => { const [h, m] = hm.split(":").map(Number); return fmtTime(new Date(2000, 0, 1, h, m).getTime() / 1000); };
@@ -733,118 +730,14 @@ $("#lw-home-set").onclick = async () => {
   catch (e) { toast(e.message); }
 };
 
-/* ---- blocking */
-
-function tagEl(label, title, onRemove) {
-  const li = $("#tpl-tag").content.firstElementChild.cloneNode(true);
-  $(".tag-label", li).textContent = label;
-  if (title) li.title = title;
-  if (onRemove) $(".tag-x", li).onclick = onRemove;
-  else $(".tag-x", li).remove();
-  return li;
-}
-
-// During a burn (or a countdown past scrubbing) the block list only grows; the server enforces it too.
-// Things added since the last save can still come off.
-const blockLocked = () => !!state.ignite.block_locked && !!settingsDoc;
-const lockedBlock = () => (blockLocked() ? settingsDoc.block : { sites: [], programs: [], apps: [], games: false, pc_games: false });
-
-let seenTags = null;
-function renderBlock() {
-  const b = editBlock;
-  const held = lockedBlock();
-  const rm = (on, fn) => (on ? null : fn);
-  $("#block-lock").hidden = !blockLocked();
-  const keys = new Set([...b.sites.map((x) => `s:${x}`), ...b.programs.map((x) => `p:${x}`), ...b.apps.map((x) => `a:${x.id}`)]);
-  const fresh = seenTags ? [...keys].filter((k) => !seenTags.has(k)) : [];
-  seenTags = keys;
-  $("#block-sites").replaceChildren(...b.sites.map((s) => tagEl(s, null, rm(held.sites.includes(s), () => { b.sites = b.sites.filter((x) => x !== s); blockEdited(); }))));
-  $("#block-programs").replaceChildren(...b.programs.map((p) => tagEl(p, null, rm(held.programs.includes(p), () => { b.programs = b.programs.filter((x) => x !== p); blockEdited(); }))));
-  const apps = [...b.apps].sort((x, y) => x.label.localeCompare(y.label));
-  $("#block-apps").replaceChildren(...apps.map((a) => tagEl(a.label, a.id, rm(held.apps.some((x) => x.id === a.id), () => { b.apps = b.apps.filter((x) => x.id !== a.id); blockEdited(); }))));
-  $("#block-games").checked = b.games;
-  $("#block-games").disabled = held.games;
-  $("#block-pc-games").checked = !!b.pc_games;
-  $("#block-pc-games").disabled = !!held.pc_games;
-  const flash = (sel, pre, list) => $$(`${sel} li`).forEach((li, i) => { if (fresh.includes(pre + list[i])) li.classList.add("new"); });
-  flash("#block-sites", "s:", b.sites);
-  flash("#block-programs", "p:", b.programs);
-  flash("#block-apps", "a:", apps.map((x) => x.id));
-  $("#cnt-sites").textContent = b.sites.length || "";
-  $("#cnt-programs").textContent = [b.programs.length || "", b.pc_games ? "games" : ""].filter(Boolean).join(" + ");
-  $("#cnt-apps").textContent = [b.apps.length || "", b.games ? "games" : ""].filter(Boolean).join(" + ");
-  paintSummaries();
-}
-const blockEdited = () => { renderBlock(); scheduleSave(); };
-
-function cleanSite(v) {
-  let s = v.trim().toLowerCase().replace(/^[a-z]+:\/\//, "").split(/[/?#]/)[0].split("@").pop().replace(/^\.+|\.+$/g, "");
-  if (s.startsWith("www.")) s = s.slice(4);
-  return /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(s) ? s : null;
-}
-
-function tagForm(form, add) {
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const input = $("input", form);
-    const bits = input.value.split(/[\s,]+/).filter(Boolean);
-    const bad = bits.filter((v) => !add(v));
-    input.value = bad.join(" ");
-    if (bad.length) toast(`Not sure what "${bad[0]}" is.`);
-    blockEdited();
-  });
-}
-tagForm($("#block-sites-add"), (v) => { const s = cleanSite(v); if (s && !editBlock.sites.includes(s)) editBlock.sites.push(s); return !!s; });
-tagForm($("#block-programs-add"), (v) => {
-  if (!/^[A-Za-z0-9._+-]{1,64}$/.test(v)) return false;
-  if (!editBlock.programs.includes(v)) editBlock.programs.push(v);
-  return true;
-});
-tagForm($("#block-apps-add"), (v) => {
-  if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(v)) return false;
-  if (!editBlock.apps.some((a) => a.id === v)) editBlock.apps.push({ id: v, label: v });
-  return true;
-});
-$("#block-games").onchange = (e) => { editBlock.games = e.target.checked; blockEdited(); };
-$("#block-pc-games").onchange = (e) => { editBlock.pc_games = e.target.checked; blockEdited(); };
-
-async function openAppPicker() {
-  if (!installedApps) {
-    $("#app-pick").innerHTML = `<li class="hint">Loading…</li>`;
-    await new Promise((r) => setTimeout(r, 30)); // let it paint before the blocking native call
-    try { installedApps = await api("GET", "/native/apps"); } catch (e) { $("#app-pick").innerHTML = `<li class="hint">${esc(e.message)}</li>`; return; }
-  }
-  $("#app-search").value = "";
-  renderAppPicker();
-}
-
-function renderAppPicker() {
-  if (!editBlock) return;
-  const q = $("#app-search").value.trim().toLowerCase();
-  const chosen = new Set(editBlock.apps.map((a) => a.id));
-  const held = new Set(lockedBlock().apps.map((a) => a.id));
-  const list = installedApps.filter((a) => !q || a.label.toLowerCase().includes(q) || a.id.includes(q));
-  $("#app-pick").innerHTML = list.map((a) => `
-    <li><label><input type="checkbox" data-id="${esc(a.id)}" ${chosen.has(a.id) ? "checked" : ""} ${held.has(a.id) ? "disabled" : ""}>
-      <span>${esc(a.label)}${a.game ? ' <em class="game">game</em>' : ""}<small>${esc(a.id)}</small></span></label></li>`).join("");
-  $$("#app-pick input").forEach((cb) => cb.onchange = () => {
-    const app = installedApps.find((a) => a.id === cb.dataset.id);
-    editBlock.apps = editBlock.apps.filter((a) => a.id !== app.id);
-    if (cb.checked) editBlock.apps.push({ id: app.id, label: app.label });
-    blockEdited();
-  });
-}
-$("#app-search").addEventListener("input", renderAppPicker);
-$("#block-apps-pick").onclick = () => { location.hash = "settings/apps"; };
-
 /* ---- pages */
 
 // Settings drills down: the board of systems, then one system. Going in slides in from the right, coming
 // back slides the board in from the left.
-const SET_DEPTH = { home: 0, apps: 2 };
+const SET_DEPTH = { home: 0 };
 
 function goSettings(page) {
-  if (!$(`.set-page[data-page="${page}"]`, settingsEl) || (page === "apps" && !NATIVE)) page = "home";
+  if (!$(`.set-page[data-page="${page}"]`, settingsEl)) page = "home";
   const was = settingsPage;
   settingsPage = page;
   settingsEl.classList.toggle("at-home", page === "home");
@@ -854,7 +747,7 @@ function goSettings(page) {
   const h = $("#settings-title");
   if (h.textContent !== title) { h.textContent = title; FX.decode(h, title, 300); }
   $("#settings-back").hidden = !sub;
-  $("#settings-back").href = page === "apps" ? "#settings/blocking" : "#settings";
+  $("#settings-back").href = "#settings";
   if (was !== page) {
     const deeper = (SET_DEPTH[page] ?? 1) > (SET_DEPTH[was] ?? 1);
     const el = sub ? $(`.set-page[data-page="${page}"]`, settingsEl) : $(".set-home", settingsEl);
@@ -865,14 +758,12 @@ function goSettings(page) {
   }
   window.scrollTo(0, 0);
   paintSummaries();
-  if (page === "apps") openAppPicker();
 }
 
 const settingsSub = () => location.hash.split("/")[1] || "home";
 
 function settingsBack() {
-  if (settingsPage === "apps") location.hash = "settings/blocking";
-  else if (settingsPage !== "home") location.hash = "settings";
+  if (settingsPage !== "home") location.hash = "settings";
   else location.hash = state.lastTab;
 }
 
@@ -883,7 +774,7 @@ function readSettingsForm() {
       weekly: Math.round((parseFloat($("#goal-weekly").value || "0") || 0) * 60),
     },
     schedules: readSchedules(),
-    block: editBlock,
+    block: settingsDoc.block,
     launch_window: readWindow(),
     end_early_over: readEndEarly(),
   };
@@ -901,6 +792,7 @@ function fillEndEarly(force) {
   el.min = blockLocked() ? settingsDoc.end_early_over : 0;
   if (force || document.activeElement !== el) el.value = settingsDoc.end_early_over;
 }
+$("#end-early").addEventListener("input", edited);
 $("#end-early").addEventListener("change", () => { if (!saveTimer) fillEndEarly(true); });
 
 const lamp = (k, st) => { const el = $(`#lamp-${k}`); if (el) el.className = `lamp ${st}`; };
@@ -977,21 +869,6 @@ function paintSummaries() {
   } else {
     pill("window", "Off", "off");
     tile("window", "Off", "Nudges you to start a burn when you get home");
-  }
-
-  const b = f.block;
-  const parts = [b.sites.length && plural(b.sites.length, "site"), b.apps.length && plural(b.apps.length, "app"),
-    b.programs.length && plural(b.programs.length, "program")].filter(Boolean);
-  const count = b.sites.length + b.apps.length + b.programs.length;
-  const phoneOff = appInfo && !appInfo.blocker.enabled;
-  const games = b.games || b.pc_games;
-  if (count || games) {
-    pill("blocking", phoneOff ? "Fix" : "On", phoneOff ? "warn" : "set");
-    tile("blocking", count ? `${count} blocked${games ? " <i>+ every game</i>" : ""}` : "Every game",
-      phoneOff ? `<b class="warn">Not on this phone: blocker is off</b>` : esc(parts.join(" · ") || "Blocked during every burn"));
-  } else {
-    pill("blocking", "Off", "off");
-    tile("blocking", "Nothing yet", "Pick the sites, apps and programs to block");
   }
 
   if (appInfo) {
@@ -1124,13 +1001,10 @@ function fillSettings(s) {
   $("#goal-daily").value = s.goals.daily || "";
   $("#goal-weekly").value = s.goals.weekly ? +(s.goals.weekly / 60).toFixed(1) : "";
   $("#schedules").replaceChildren(...s.schedules.map(scheduleEl));
-  editBlock = JSON.parse(JSON.stringify(s.block));
   goalPainters.forEach((p) => p());
   fillWindow(s.launch_window);
   $("#lw-body").classList.toggle("off", !s.launch_window.enabled);
-  renderBlock();
   fillEndEarly(true);
-  if (settingsPage === "apps" && installedApps) renderAppPicker();
 }
 
 async function openSettings() {
@@ -1160,8 +1034,8 @@ async function loadAppInfo() {
     $("#usage-btn").disabled = !!us.granted;
     $("#usage-state").textContent = usErr ? `can't send screen time: ${us.last_error}`
       : us.granted ? "counts this phone's screen time" : "needs usage access to count screen time";
-    $("#blocker-hint").hidden = !!bl.enabled;
-    $("#blocker-hint").textContent = "The blocker is off on this phone, so apps and sites won't be blocked here. Turn it on in Settings › Phone.";
+    $("#lim-blocker-hint").hidden = !!bl.enabled;
+    $("#lim-blocker-hint").textContent = "The blocker is off on this phone. Turn it on in Settings › This phone.";
     $("#ring-toggle").checked = !!appInfo.ring.enabled;
     $("#ring-sound-row").hidden = !appInfo.ring.enabled;
     $$("#ring-sound [data-sound]").forEach((b) => b.classList.toggle("on", b.dataset.sound === appInfo.ring.sound));
@@ -1207,6 +1081,7 @@ const stable = (v) => JSON.stringify(v, (k, x) => x && typeof x === "object" && 
   ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x);
 
 const settingsChanged = () => settingsDoc && stable(readSettingsForm()) !== stable({
+  // block is absent after migration; preserve it on an older standalone phone until LocalLimits reads it.
   goals: settingsDoc.goals, schedules: settingsDoc.schedules, block: settingsDoc.block, launch_window: settingsDoc.launch_window,
   end_early_over: settingsDoc.end_early_over,
 });
@@ -1226,7 +1101,6 @@ async function saveSettings() {
   try {
     settingsDoc = await api("PUT", "/api/settings", readSettingsForm());
     state.settings = settingsDoc;
-    if (stable(settingsDoc.block) !== stable(editBlock)) { editBlock = JSON.parse(JSON.stringify(settingsDoc.block)); renderBlock(); }
     fillEndEarly();
     loadIgnite();
   } catch (e) { toast(`Couldn't save: ${e.message}`); }
@@ -1613,7 +1487,7 @@ window.ignitionRefresh = () => {
 };
 window.ignitionBack = () => {
   if (mecoDialog.open) { mecoDialog.close(); return true; }
-  const sheet = $("dialog.sheet[open]");
+  const sheet = $$("dialog.sheet[open]").at(-1);
   if (sheet) { sheet.close(); return true; }
   if (state.page === "settings") { settingsBack(); return true; }
   if (state.page !== "ignite") { location.hash = "ignite"; return true; }

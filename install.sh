@@ -146,6 +146,6 @@ if [ -z "$join" ]; then
 else
     say "  This computer follows the app at $join"
 fi
-[ -z "$blocker" ] || say "  Blocking:         on for this computer. Choose what to block in the app: Settings › Blocking."
+[ -z "$blocker" ] || say "  Blocking:         on for this computer. Choose what to block in the app: Limits."
 [ -z "$widgets" ] || say "  Plasma widgets:   right-click the desktop › Add Widgets, and search for ignition."
 [ -z "$tracker" ] || say "  Screen time:      counted on this computer. See it in the app's Screen tab."

@@ -52,40 +52,20 @@ object Logic {
     fun canScrub(s: JSONObject, t: Long = now()): Boolean = t < scrubUntil(s)
 
     /**
-     * While a burn is on, or its countdown can no longer be scrubbed, the block list only grows: taking
-     * a site off it mid-burn would be a way out.
+     * While a burn is on, or its countdown can no longer be scrubbed, ending early can only get harder
+     * and burn limits can only grow: loosening one would be a way out.
      */
     fun blockLocked(store: Store, t: Long = now()): Boolean {
         val cur = current(store, t)
         return cur.phase == "burning" || (cur.phase == "countdown" && !canScrub(cur.session!!, t))
     }
 
-    /** The block list while it's locked: whatever [new] adds, plus everything [old] had. Both cleaned. */
-    fun ratchetBlock(old: JSONObject, new: JSONObject): JSONObject {
-        val out = JSONObject(new.toString())
-        for (key in listOf("sites", "programs")) {
-            val arr = out.getJSONArray(key)
-            val have = (0 until arr.length()).map { arr.getString(it) }.toHashSet()
-            val prev = old.optJSONArray(key) ?: JSONArray()
-            for (i in 0 until prev.length()) if (have.add(prev.getString(i))) arr.put(prev.getString(i))
-        }
-        val apps = out.getJSONArray("apps")
-        val ids = (0 until apps.length()).map { apps.getJSONObject(it).optString("id") }.toHashSet()
-        val prev = old.optJSONArray("apps") ?: JSONArray()
-        for (i in 0 until prev.length()) prev.optJSONObject(i)?.let { if (ids.add(it.optString("id"))) apps.put(it) }
-        for (key in listOf("games", "pc_games")) out.put(key, new.optBoolean(key) || old.optBoolean(key))
-        return out
-    }
-
     /**
-     * [value] (already cleaned) as it may be saved now. While locked, the block list is ratcheted and
-     * ending early can only get harder.
+     * [value] (already cleaned) as it may be saved now. While locked, ending early can only get harder.
      */
     fun lockSettings(store: Store, value: JSONObject, t: Long = now()): JSONObject {
         if (!blockLocked(store, t)) return value
-        value.put("end_early_over", maxOf(endEarlyOver(store), value.optInt("end_early_over", END_EARLY_OVER)))
-        val old = store.settings.optJSONObject("block") ?: return value
-        return value.put("block", ratchetBlock(old, value.getJSONObject("block")))
+        return value.put("end_early_over", maxOf(endEarlyOver(store), value.optInt("end_early_over", END_EARLY_OVER)))
     }
 
     fun newSession(id: String, minutes: Int, startsAt: Long, source: String): JSONObject = JSONObject()

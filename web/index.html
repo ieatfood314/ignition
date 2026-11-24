@@ -138,13 +138,18 @@
         <button type="button" class="ghost small lim-new" id="lim-new">+ New limit</button>
       </div>
       <p class="lim-burn" id="lim-burn" hidden>No unlocks until the burn ends.</p>
+      <p class="hint" id="lim-blocker-hint" hidden></p>
       <ul class="limits" id="lim-list"></ul>
       <p class="empty" id="lim-empty" hidden></p>
       <div class="lim-settings" id="lim-settings" hidden>
+        <div id="lim-loosening">
         <h2 class="st-h hud-h"><span>Loosening</span><span class="st-note" id="lim-set-note"></span></h2>
         <div class="set-row"><label class="auto" for="lim-wait">Wait before loosening a limit</label><input type="number" id="lim-wait" inputmode="numeric" min="0" max="1440"><span>min</span></div>
         <div class="toggle-row"><span>Lock ignition's settings on the phone<span class="hint inline">Its blocker, usage access and uninstall</span></span><label class="switch" aria-label="Lock ignition's settings on the phone"><input type="checkbox" id="lim-guard"><i></i></label></div>
         <div class="lim-set-actions" id="lim-set-actions"></div>
+        </div>
+        <h2 class="st-h hud-h"><span>Burns</span></h2>
+        <div class="set-row"><label class="auto" for="end-early">Allow ending early for burns over</label><input type="number" id="end-early" inputmode="numeric" min="0" max="720"><span>min</span></div>
       </div>
     </section>
 
@@ -202,12 +207,6 @@
             <span class="sys-name">Launch window</span>
             <span class="sys-viz" id="viz-window"></span>
             <span class="set-sum" id="sum-window"></span>
-          </a>
-          <a class="sys" href="#settings/blocking" data-go="blocking" style="--n:3">
-            <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><b class="pill" id="pill-blocking"></b></span>
-            <span class="sys-name">Blocking</span>
-            <span class="sys-viz" id="viz-blocking"></span>
-            <span class="set-sum" id="sum-blocking"></span>
           </a>
           <a class="sys" href="#settings/devices" data-go="devices" style="--n:4">
             <span class="sys-top"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="13" height="10" rx="1.5"/><path d="M6 19h5M8.5 15v4"/><rect x="17" y="8" width="5" height="11" rx="1"/></svg><b class="pill" id="pill-devices"></b></span>
@@ -271,39 +270,10 @@
             </div>
           </section>
 
-          <section class="set-page" data-page="blocking" data-title="Blocking" hidden>
-            <p class="block-lock" id="block-lock" hidden>Locked till the burn ends. You can still add.</p>
-            <h3>Websites<span class="h-count" id="cnt-sites"></span></h3>
-            <p class="hint">Subdomains count too. Blocked in every browser on your phone, and on computers running the enforcer.</p>
-            <ul class="tag-list" id="block-sites"></ul>
-            <form class="tag-add" id="block-sites-add"><input placeholder="add a site, e.g. example.com" autocapitalize="off" spellcheck="false" inputmode="url"><button type="submit" class="ghost small">Add</button></form>
-
-            <h3>Phone apps<span class="h-count" id="cnt-apps"></span></h3>
-            <div class="toggle-row"><span>Every game<span class="hint inline">anything Android files as a game, even hidden ones</span></span><label class="switch" aria-label="Block every game"><input type="checkbox" id="block-games"><i></i></label></div>
-            <ul class="tag-list" id="block-apps"></ul>
-            <button type="button" class="ghost small app-only" id="block-apps-pick">+ Choose apps</button>
-            <form class="tag-add web-only" id="block-apps-add"><input placeholder="package name, e.g. com.reddit.frontpage" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost small">Add</button></form>
-            <p class="hint" id="blocker-hint" hidden></p>
-
-            <h3>Programs on computers<span class="h-count" id="cnt-programs"></span></h3>
-            <div class="toggle-row"><span>Every game<span class="hint inline">Steam, Proton and Wine games</span></span><label class="switch" aria-label="Block every game on computers"><input type="checkbox" id="block-pc-games"><i></i></label></div>
-            <p class="hint">Killed, along with anything they started, if they're launched during a burn.</p>
-            <ul class="tag-list" id="block-programs"></ul>
-            <form class="tag-add" id="block-programs-add"><input placeholder="add a program, e.g. steam" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost small">Add</button></form>
-
-            <h3>Ending early</h3>
-            <div class="set-row"><label class="auto" for="end-early">Allowed for burns over</label><input type="number" id="end-early" inputmode="numeric" min="0" max="720"><span>min</span></div>
-          </section>
-
           <section class="set-page" data-page="devices" data-title="Devices" hidden>
             <ul class="devices" id="devices"></ul>
             <h3>Add a computer</h3>
             <pre class="cmd" id="dev-cmd"></pre>
-          </section>
-
-          <section class="set-page" data-page="apps" data-title="Choose apps" hidden>
-            <input class="app-search" id="app-search" placeholder="Search apps" autocapitalize="off" spellcheck="false">
-            <ul class="app-pick" id="app-pick"></ul>
           </section>
 
           <section class="set-page" data-page="phone" data-title="This phone" hidden>
@@ -372,14 +342,18 @@
     <input class="lim-name" id="lim-name" placeholder="Name" maxlength="60" aria-label="Name">
     <h3>Applies to</h3>
     <div class="chips cats" id="lim-cats" role="group" aria-label="Categories"></div>
+    <div class="chips cats" id="lim-games" role="group" aria-label="All games"></div>
     <ul class="tag-list" id="lim-things"></ul>
     <form class="tag-add" id="lim-add"><input placeholder="Add an app or site" list="lim-known" autocapitalize="off" spellcheck="false" aria-label="Add an app or site"><button type="submit" class="ghost small">Add</button></form>
     <datalist id="lim-known"></datalist>
+    <button type="button" class="ghost small app-only" id="lim-choose-apps">Choose phone apps</button>
+    <form class="tag-add" id="lim-add-program"><input placeholder="Add a computer program" autocapitalize="off" spellcheck="false" aria-label="Add a computer program"><button type="submit" class="ghost small">Add</button></form>
+    <p class="block-lock" id="lim-block-lock" hidden>Locked till the burn ends. You can still add.</p>
     <h3>Rules</h3>
     <div class="rules" id="lim-rules"></div>
     <div class="chips add-rule" id="lim-add-rule"></div>
-    <h3>Unlocking</h3>
-    <div class="toggle-row"><span>Allow unlocking</span><label class="switch" aria-label="Allow unlocking"><input type="checkbox" id="lim-unlock-on"><i></i></label></div>
+    <h3 id="lim-unlock-heading">Unlocking</h3>
+    <div class="toggle-row" id="lim-unlock-toggle"><span>Allow unlocking</span><label class="switch" aria-label="Allow unlocking"><input type="checkbox" id="lim-unlock-on"><i></i></label></div>
     <div class="unlock-set" id="lim-unlock">
       <div class="set-row"><label>Hold for</label><input type="number" id="lim-hold" inputmode="numeric" min="1" max="60"><span>s, then wait</span><input type="number" id="lim-uwait" inputmode="numeric" min="0" max="240"><span>min</span></div>
       <div class="set-row"><label>Unlock for</label><input type="number" id="lim-grant" inputmode="numeric" min="1" max="240"><span>min</span></div>
@@ -387,6 +361,14 @@
     </div>
     <p class="hint lim-msg" id="lim-msg"></p>
     <div class="sheet-actions" id="lim-actions"></div>
+  </dialog>
+
+  <dialog id="limit-app-dialog" class="sheet" aria-labelledby="limit-app-title">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <h2 id="limit-app-title">Choose phone apps</h2>
+    <input class="app-search" id="app-search" placeholder="Search apps" autocapitalize="off" spellcheck="false">
+    <ul class="app-pick" id="app-pick"></ul>
+    <div class="sheet-actions"><button type="button" class="ghost" id="limit-app-close">Done</button></div>
   </dialog>
 
   <dialog id="thing-dialog" class="sheet thing-sheet" aria-labelledby="thing-title">

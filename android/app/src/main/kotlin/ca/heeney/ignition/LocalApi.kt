@@ -33,6 +33,18 @@ class LocalApi(private val context: Context) {
                 }
                 r == listOf("settings") && method == "GET" -> { mutated = false; Logic.cleanSettings(store.settings) }
                 r == listOf("settings") && method == "PUT" -> Logic.lockSettings(store, Logic.cleanSettings(body)).also { store.putSettings(it) }
+                r == listOf("limits") && method == "GET" -> { mutated = false; LocalLimits.report(context, store) }
+                r == listOf("limits") && method == "PUT" && body.optBoolean("dry") -> {
+                    mutated = false
+                    JSONObject().put("wait", false).put("minutes", 0)
+                }
+                r == listOf("limits") && method == "PUT" -> LocalLimits.save(context, store, body)
+                r.size == 2 && r[0] == "limits" && method == "DELETE" -> LocalLimits.delete(context, store, r[1])
+                r == listOf("limits", "settings") && method == "PUT" -> {
+                    mutated = false
+                    JSONObject().put("settings", JSONObject().put("changes_wait", 0).put("guard", true))
+                        .put("applied", true).put("at", JSONObject.NULL)
+                }
                 r == listOf("stats") -> { mutated = false; Logic.stats(store) }
                 r == listOf("burns") -> { mutated = false; Logic.burns(store) }
                 else -> throw ApiError(404, "not found")

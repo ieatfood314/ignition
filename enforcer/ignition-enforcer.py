@@ -2,8 +2,8 @@
 """Ignition enforcer: runs as root on each machine and applies blocks while a session is active, and
 whenever a screen-time limit is closed.
 
-Every few seconds it heartbeats to the ignition server, which replies with the current session, the
-shared block list and what the closed limits cover. While a limit is closed (and not unlocked), its sites
+Every few seconds it heartbeats to the ignition server, which replies with the current session and what
+the closed limits cover, including limits that apply only while burning. While a limit is closed (and not unlocked), its sites
 are kept out of /etc/hosts and its programs are paused or killed like a burn's: open ones are frozen,
 new ones killed. A limit on Play also catches games themselves (Steam and Proton games, Windows .exe
 programs). While a session is active it:
@@ -21,7 +21,7 @@ programs). While a session is active it:
   * runs the optional burn/idle hooks (e.g. to recolour RGB lighting).
 With hooks.steps set, the burn hook re-runs each time another 1/steps of the burn is used up, and a
 countdown hook does the same through a T-minus, so the lighting can count down (see openrgb-ram).
-The last known session, block list and limits are cached on disk, so blocks hold until the session ends
+The last known session and limits are cached on disk, so blocks hold until the session ends
 (and limits until they'd open) even if the server is unreachable.
 """
 
@@ -112,7 +112,7 @@ class Enforcer:
         self.show_lock = threading.Lock()
         self.notify_user = cfg.get("notify_user")
         self.session = self.load_cache()
-        self.remote = self.session.pop("block", None) or {"sites": [], "programs": []}
+        self.session.pop("block", None)  # old cache: shared blocks are limits now
         self.limits = self.session.pop("limits", None) or NO_LIMITS
         self.limit_since = self.session.pop("limit_since", None) or {}  # limit id -> when it closed here
         self.armed = False
@@ -135,31 +135,38 @@ class Enforcer:
     def save_cache(self):
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         tmp = CACHE.with_suffix(".tmp")
-        tmp.write_text(json.dumps({**self.session, "block": self.remote, "limits": self.limits,
-                                   "limit_since": self.limit_since}))
+        tmp.write_text(json.dumps({**self.session, "limits": self.limits, "limit_since": self.limit_since}))
         tmp.replace(CACHE)
 
     @property
     def block(self):
-        """Program names a burn blocks; GAME stands for every game."""
-        games = [GAME] if self.remote.get("games") else []
-        return sorted(set(self.local_block) | set(self.remote.get("programs") or []) | set(games))
+        """Extra program names this computer always blocks during a burn."""
+        return sorted(set(self.local_block))
 
     def active(self):
         s = self.session
-        return bool(s.get("active")) and time.time() < s.get("ends_at", 0)
+        t = time.time()
+        # A cached countdown lifts off on time even if the server is gone by then.
+        return bool(s.get("session_id")) and s.get("started_at", 0) <= t < s.get("ends_at", 0)
 
     def closed_limits(self):
         """Limits closed right now. Offline, the cached ones still count until they'd have opened."""
         t = time.time()
-        return [lim for lim in self.limits.get("limits") or [] if lim.get("until") is None or t < lim["until"]]
+        out = []
+        for lim in self.limits.get("limits") or []:
+            if lim.get("burn"):
+                if self.active() and (lim.get("starts_at") is None or t >= lim["starts_at"]):
+                    out.append(lim)
+            elif lim.get("until") is None or t < lim["until"]:
+                out.append(lim)
+        return out
 
     def wanted(self):
         """Program name -> (since, limit or None for the burn): what to block now. Open before `since`
         means it gets paused; started after, killed."""
         out, t = {}, time.time()
         for lim in self.closed_limits():
-            since = self.limit_since.get(lim["id"], t)
+            since = self.session.get("started_at") if lim.get("burn") else self.limit_since.get(lim["id"], t)
             for name in lim.get("programs") or []:
                 out.setdefault(name, (since, lim))
             if lim.get("games"):
@@ -186,12 +193,11 @@ class Enforcer:
             return f"server unreachable: {e}"
         new = {k: s.get(k) for k in ("active", "phase", "session_id", "started_at", "ends_at")}
         new["created_at"] = (s.get("session") or {}).get("created_at")
-        remote = s.get("block") or self.remote
         limits = s.get("limit_block") or NO_LIMITS
         ids = {lim["id"] for lim in limits.get("limits") or []}
         since = {i: self.limit_since.get(i, time.time()) for i in ids}
-        if new != self.session or remote != self.remote or limits != self.limits or since != self.limit_since:
-            self.session, self.remote, self.limits, self.limit_since = new, remote, limits, since
+        if new != self.session or limits != self.limits or since != self.limit_since:
+            self.session, self.limits, self.limit_since = new, limits, since
             self.save_cache()
         return None
 
@@ -620,10 +626,16 @@ class Enforcer:
         """A minute before a T-minus lifts off, say what it'll pause, so there's time to get to a checkpoint."""
         s = self.session
         left = (s.get("started_at") or 0) - time.time()
-        if not self.block or not s.get("session_id") or self.warned == s["session_id"] or not 0 < left <= WARN_SECONDS:
+        burn_block = set(self.block)
+        for lim in self.limits.get("limits") or []:
+            if lim.get("burn"):
+                burn_block.update(lim.get("programs") or [])
+                if lim.get("games"):
+                    burn_block.add(GAME)
+        if not burn_block or not s.get("session_id") or self.warned == s["session_id"] or not 0 < left <= WARN_SECONDS:
             return
         self.warned = s["session_id"]
-        names = sorted({name for _, name, _, _ in self.scan({n: None for n in self.block})[0]})
+        names = sorted({name for _, name, _, _ in self.scan({n: None for n in burn_block})[0]})
         if names:
             what = ", ".join(n.capitalize() for n in names)
             self.notify(f"Liftoff in {round(left)} seconds",
@@ -669,7 +681,7 @@ class Enforcer:
             return
         if not self.armed:
             log(f"session active until {time.ctime(self.session['ends_at'])}: arming")
-        self.apply_hosts(sorted(set(sites) | set(self.remote.get("sites") or [])))
+        self.apply_hosts(sorted(set(sites)))
         if self.t3.get("ports") or self.block_ports:
             self.apply_nft()
             self.kill_clients()

@@ -16,18 +16,19 @@ object Sites {
     // A domain may be followed by a path, whitespace or sentence punctuation: Firefox's address bar reads
     // " m.youtube.com. Search or enter address" to a screen reader.
     private val HOSTLIKE = Regex(
-        "(?:[a-z][a-z0-9+.-]*://)?((?:[a-z0-9-]+\\.)+[a-z]{2,63})(?::\\d{1,5})?(?=[/?#\\s.,;)]|$)",
+        "(?:[a-z][a-z0-9+.-]*://)?((?:[a-z0-9-]+\\.)+[a-z]{2,63})(:\\d{1,5})?(?=[/?#\\s.,;)]|$)",
         RegexOption.IGNORE_CASE,
     )
     // The server's own list, kept short: what a mobile site puts in front of the real one.
     private val NOISE = setOf("www", "m", "mobile", "amp", "touch")
 
     /** The domain an address bar shows, without the "www." or "m." in front, or null if it shows none. */
-    fun hostIn(text: String): String? {
-        val host = HOSTLIKE.find(text.trim())?.groupValues?.get(1)?.lowercase() ?: return null
+    fun hostIn(text: String, keepPort: Boolean = false): String? {
+        val match = HOSTLIKE.find(text.trim()) ?: return null
+        val host = match.groupValues[1].lowercase()
         var labels = host.split('.')
         while (labels.size > 2 && labels[0] in NOISE) labels = labels.drop(1)
-        return labels.joinToString(".")
+        return labels.joinToString(".") + if (keepPort) match.groupValues[2] else ""
     }
 }
 

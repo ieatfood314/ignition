@@ -75,6 +75,16 @@ class Rules(unittest.TestCase):
         use = [[at(MON, 9), at(MON, 9, 10)]]
         self.assertEqual(limits.evaluate(l, use, at(MON, 9, 10))["left"], 20 * M)
 
+    def test_burn_rule_only_closes_during_a_burn(self):
+        l = lim({"kind": "burn"})
+        self.assertFalse(limits.evaluate(l, [], at(MON, 12))["blocked"])
+        countdown = {"phase": "countdown", "starts_at": at(MON, 13), "ends_at": at(MON, 14)}
+        self.assertFalse(limits.evaluate(l, [], at(MON, 12), countdown)["blocked"])
+        burning = {"phase": "burning", "starts_at": at(MON, 11), "ends_at": at(MON, 14)}
+        s = limits.evaluate(l, [], at(MON, 12), burning)
+        self.assertTrue(s["blocked"])
+        self.assertEqual(s["until"], at(MON, 14))
+
     def test_bad_input(self):
         for bad in ({"targets": [], "rules": [{"kind": "day", "minutes": 5}]},
                     {"targets": ["n:x"], "rules": []},
@@ -110,6 +120,11 @@ class Loosening(unittest.TestCase):
         narrower = dict(old, rules=[{"kind": "block", "from": "23:00", "to": "07:00", "days": limits.ALL_DAYS}])
         self.assertFalse(limits.loosens(old, wider))
         self.assertTrue(limits.loosens(old, narrower))
+
+    def test_identical_burn_rules_do_not_loosen(self):
+        old = lim({"kind": "burn"})
+        self.assertFalse(limits.loosens(old, lim({"kind": "burn"})))
+        self.assertTrue(limits.loosens(old, lim({"kind": "block", "from": "22:00", "to": "07:00"})))
 
     def test_deleting_loosens(self):
         self.assertTrue(limits.loosens(lim({"kind": "day", "minutes": 60}), None))
@@ -156,6 +171,24 @@ class Storage(unittest.TestCase):
         self.assertTrue(limits.rows(self.db, t + 3660)[0]["deleting"])
         limits.cancel(self.db, lid)
         self.assertEqual(len(limits.rows(self.db, t + 7200)), 1)
+
+    def test_pending_burn_loosening_waits_for_the_burn_to_end(self):
+        t = at(MON, 9)
+        made = limits.save(self.db, {"targets": ["s:youtube.com", "s:reddit.com"], "rules": [{"kind": "burn"}]}, now=t)
+        lid = made["limit"]["id"]
+        later = t + 3600
+        looser = limits.save(self.db, {"id": lid, "targets": ["s:youtube.com"], "rules": [{"kind": "burn"}]}, now=later)
+        self.assertFalse(looser["applied"])
+        live = {"phase": "burning", "starts_at": later, "ends_at": later + 30 * 60}
+        row = limits.report(self.db, now=later + 20 * 60, live=live)["limits"][0]
+        self.assertEqual(len(row["limit"]["targets"]), 2)
+        self.assertEqual(row["pending_at"], int((later + 30 * 60) * 1000))
+        # Even an unrelated dry run must not settle the deferred change without live burn state.
+        limits.would_wait(self.db, {"targets": ["s:example.com"], "rules": [{"kind": "day", "minutes": 5}]},
+                          now=later + 20 * 60, live=live)
+        self.assertEqual(len(limits.rows(self.db, later + 20 * 60, live)[0]["limit"]["targets"]), 2)
+        row = limits.report(self.db, now=later + 31 * 60)["limits"][0]
+        self.assertEqual(row["limit"]["targets"], ["s:youtube.com"])
 
     def test_settings_shorter_wait_waits(self):
         t = at(MON, 9)
@@ -249,6 +282,14 @@ class Unlocks(unittest.TestCase):
         # the next day starts at 04:00
         self.assertEqual(self.item(at("2026-03-10", 5))["unlock"]["left"], 2)
 
+    def test_burn_limits_never_unlock(self):
+        lid = limits.save(self.db, {"targets": ["n:x"], "rules": [{"kind": "burn"}],
+                                    "unlock": {"hold": 1, "wait": 0, "grant": 10}}, now=self.t)["limit"]["id"]
+        row = next(r for r in limits.rows(self.db, self.t) if r["limit"]["id"] == lid)
+        self.assertIsNone(row["limit"]["unlock"])
+        with self.assertRaisesRegex(ValueError, "can't be unlocked"):
+            limits.start_unlock(self.db, lid, "pc", now=self.t)
+
     def test_no_unlocking_means_none(self):
         lid = limits.save(self.db, {"targets": ["n:x"], "rules": [{"kind": "day", "minutes": 0}], "unlock": None},
                           now=self.t)["limit"]["id"]
@@ -288,6 +329,38 @@ class Enforce(unittest.TestCase):
         self.assertIn("reddit.com", out["sites"])
         self.assertEqual(len(out["limits"]), 2)
 
+    def test_direct_burn_targets_enforce_exactly(self):
+        now = at(MON, 12)
+        self.send("pc-1234", "desktop", [(at(MON, 9), at(MON, 10), "com.termux", "")], now)
+        self.send("phone-1234", "phone", [(at(MON, 9), at(MON, 10), "org.videolan.vlc", "")], now)
+        limits.save(self.db, {"targets": ["s:youtube.com", "a:com.termux", "p:vlc", "g:phone"],
+                              "rules": [{"kind": "burn"}]}, now=now)
+        live = {"phase": "burning", "starts_at": at(MON, 11), "ends_at": at(MON, 14)}
+        out = limits.enforce(self.db, now=now, live=live)
+        self.assertEqual(out["sites"], ["youtube.com"])
+        self.assertEqual(out["programs"], ["vlc"])
+        self.assertFalse(out["games"])
+        self.assertTrue(out["limits"][0]["burn"])
+        countdown = {"phase": "countdown", "starts_at": at(MON, 13), "ends_at": at(MON, 14)}
+        cached = limits.enforce(self.db, now=now, live=countdown)["limits"][0]
+        self.assertTrue(cached["burn"])
+        self.assertEqual(cached["starts_at"], at(MON, 13))
+        self.assertEqual(cached["until"], at(MON, 14))
+        report = limits.report(self.db, now=now, device="phone-1234", live=live)["limits"][0]
+        self.assertEqual(report["match"]["apps"], ["com.termux"])
+        self.assertEqual(report["match"]["sites"], ["youtube.com"])
+        self.assertEqual(limits.enforce(self.db, now=now), {"sites": [], "programs": [], "games": False, "limits": []})
+        limits.save(self.db, {"targets": ["g:computer"], "rules": [{"kind": "burn"}]}, now=now)
+        self.assertTrue(limits.enforce(self.db, now=now, live=live)["games"])
+
+    def test_direct_sites_cover_subdomains_and_ports(self):
+        l = lim({"kind": "burn"}, targets=("s:example.com", "s:nas.local:8000"))
+        namer = core.Namer(self.db)
+        self.assertTrue(limits.matches(l, namer, "", "m.example.com"))
+        self.assertFalse(limits.matches(l, namer, "", "notexample.com"))
+        self.assertTrue(limits.matches(l, namer, "", "nas.local:8000"))
+        self.assertFalse(limits.matches(l, namer, "", "nas.local:9000"))
+
     def test_nothing_closed_blocks_nothing(self):
         now = at(MON, 12)
         limits.save(self.db, {"targets": ["n:youtube"], "rules": [{"kind": "day", "minutes": 20}]}, now=now)
@@ -315,6 +388,15 @@ class Kinds(unittest.TestCase):
 
     def closed(self, now):
         return limits.report(self.db, now=now)["limits"][0]["state"]["blocked"]
+
+    def test_burn_category_change_waits_even_with_zero_wait(self):
+        core.kv_set(self.db, "limit_settings", json.dumps({"changes_wait": 0, "guard": True}))
+        limits.save(self.db, {"targets": ["c:watch"], "rules": [{"kind": "burn"}]}, now=self.t)
+        live = {"phase": "burning", "starts_at": self.t - 60, "ends_at": self.t + 3600, "locked": True}
+        r = limits.set_category(self.db, "n:youtube", "make", now=self.t, live=live)
+        self.assertFalse(r["applied"])
+        self.assertEqual(r["at"], int((self.t + 3600) * 1000))
+        self.assertEqual(core.Namer(self.db).category("zen", "youtube.com"), "watch")
 
     def test_out_of_a_limited_kind_waits(self):
         self.assertTrue(self.closed(self.t))

@@ -260,7 +260,7 @@ class MainActivity : Activity() {
                         throw ApiError(400, "Can't reach it: ${e.message ?: e.javaClass.simpleName}")
                     }
                     // A new address for the same server is fine; a server without these limits isn't.
-                    if (LimitStore.guarded(this)) {
+                    if (store.serverUrl.isNotEmpty() && LimitStore.guarded(this)) {
                         val ids = runCatching {
                             val arr = Http.get("$url/api/limits").optJSONArray("limits") ?: org.json.JSONArray()
                             (0 until arr.length()).map { arr.getJSONObject(it).getJSONObject("limit").optString("id") }.toSet()
@@ -270,6 +270,7 @@ class MainActivity : Activity() {
                         }
                     }
                 }
+                if (url.isNotEmpty()) LocalLimits.upload(this, store, url)
                 synchronized(store) {
                     if (url != store.serverUrl) {
                         store.serverUrl = url
@@ -324,6 +325,8 @@ class MainActivity : Activity() {
                     JSONObject().put("status", 200).put("body", proxy(method, path, body))
                 } catch (e: Http.Failed) {
                     JSONObject().put("status", e.status).put("body", JSONObject().put("error", e.message))
+                } catch (e: ApiError) {
+                    JSONObject().put("status", e.status).put("body", JSONObject().put("error", e.message))
                 } catch (e: Exception) {
                     JSONObject().put("status", 502).put("body", JSONObject().put("error", "Can't reach the server"))
                 }
@@ -351,6 +354,10 @@ class MainActivity : Activity() {
     private fun proxy(method: String, path: String, body: String): Any {
         if (!path.startsWith("/api/")) throw Http.Failed(404, "not found")
         val url = Store.get(this).let { synchronized(it) { it.serverUrl } }
+        if (url.isEmpty() && path.startsWith("/api/limits")) {
+            val json = if (body.isBlank()) JSONObject() else JSONTokener(body).nextValue() as JSONObject
+            return LocalApi(this).handle(method, path, json)
+        }
         if (url.isEmpty()) throw Http.Failed(503, "Needs the server")
         var send = body.ifBlank { null }
         // An unlock is the phone's: the server keeps which device it was.

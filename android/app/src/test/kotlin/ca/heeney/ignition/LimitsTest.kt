@@ -64,6 +64,15 @@ class LimitsTest {
         assertEquals(20 * min, eval(l, listOf(Iv(at(9, 9), at(9, 9, 10))), at(9, 9, 10)).left)
     }
 
+    @Test fun blockedOnlyWhileBurning() {
+        val l = lim(Rule("burn"))
+        assertFalse(eval(l, emptyList(), at(9, 12)).blocked)
+        Limits.evaluate(l, emptyList(), at(9, 12), zone, burning = true, burnEndsAt = at(9, 13)).let {
+            assertTrue(it.blocked)
+            assertEquals(at(9, 13), it.until)
+        }
+    }
+
     @Test fun whatALimitCovers() {
         val l = lim(Rule("day", minutes = 60))
         assertTrue(Limits.covers(l, "com.google.android.youtube", ""))
@@ -93,6 +102,17 @@ class LimitsTest {
     @Test fun closedAllWeekHasNoOpening() {
         val l = lim(Rule("block", from = "00:00", to = "00:00"))
         eval(l, emptyList(), at(9, 15)).let { assertTrue(it.blocked); assertEquals(null, it.until) }
+    }
+
+    @Test fun directTargetsMatchAppsAndSiteSubdomains() {
+        val o = org.json.JSONObject("""{"limits":[{"label":"Distractions","limit":{"id":"l-direct",
+            "targets":["s:youtube.com","a:com.termux","g:computer"],"rules":[{"kind":"burn"}],"unlock":null},
+            "match":{"apps":[],"sites":[],"names":[]},"others":[]}],"settings":{"guard":true}}""")
+        val l = LimitSnapshot.parse(o, 5, setOf("com.new.game")).limits.single()
+        assertTrue(Limits.covers(l, "com.termux", ""))
+        assertTrue(Limits.covers(l, "org.mozilla.firefox", "m.youtube.com"))
+        assertFalse(Limits.covers(l, "com.new.game", ""))
+        assertFalse(Limits.covers(l, "org.mozilla.firefox", "notyoutube.com"))
     }
 
     @Test fun readsTheServersReport() {

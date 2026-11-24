@@ -7,6 +7,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SitesTest {
+    @Test fun portCanBeKeptForBlockingButNotScreenTime() {
+        assertEquals("nas.local", Sites.hostIn("https://nas.local:8000/path"))
+        assertEquals("nas.local:8000", Sites.hostIn("https://nas.local:8000/path", keepPort = true))
+    }
+
     private fun s(n: Int) = n * 1000L
     private val ff = "org.mozilla.firefox"
     private fun mark(t: Int, site: String, pkg: String = ff) = Mark(s(t), pkg, site)

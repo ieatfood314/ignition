@@ -47,6 +47,8 @@ data class Limit(
     val others: List<Iv>,
     /** An unlock (from any device) has it open until then, by the server's clock. */
     val openUntil: Long? = null,
+    /** Exact site targets, including their subdomains. */
+    val siteTargets: Set<String> = emptySet(),
 )
 
 data class RuleState(val blocked: Boolean, val until: Long?, val left: Long?)
@@ -110,8 +112,9 @@ object Limits {
 
     private fun allWeek(r: Rule) = r.from == r.to && r.days.containsAll(ALL_DAYS)
 
-    fun rule(r: Rule, usage: List<Iv>, now: Long, zone: ZoneId): RuleState {
+    fun rule(r: Rule, usage: List<Iv>, now: Long, zone: ZoneId, burning: Boolean = false, burnEndsAt: Long? = null): RuleState {
         when (r.kind) {
+            "burn" -> return if (burning) RuleState(true, burnEndsAt, null) else RuleState(false, null, null)
             "day" -> {
                 val date = dayOf(now, zone)
                 if (weekday(date) !in r.days) return RuleState(false, null, null)
@@ -148,8 +151,9 @@ object Limits {
     }
 
     /** [usage] is the merged time on what the limit covers, across devices, over the last [HORIZON]. */
-    fun evaluate(limit: Limit, usage: List<Iv>, now: Long, zone: ZoneId = ZoneId.systemDefault()): LimitState {
-        val states = limit.rules.map { rule(it, usage, now, zone) }
+    fun evaluate(limit: Limit, usage: List<Iv>, now: Long, zone: ZoneId = ZoneId.systemDefault(),
+                 burning: Boolean = false, burnEndsAt: Long? = null): LimitState {
+        val states = limit.rules.map { rule(it, usage, now, zone, burning, burnEndsAt) }
         val blocking = states.filter { it.blocked }
         if (blocking.isNotEmpty()) {
             val untils = blocking.map { it.until }
@@ -164,7 +168,7 @@ object Limits {
     /** Does a span of [pkg] showing [site] ("" for none) count towards [limit]? */
     fun covers(limit: Limit, pkg: String, site: String): Boolean {
         if (site.isEmpty()) return pkg in limit.apps
-        if (site in limit.sites) return true
+        if (site in limit.sites || Blocking.matchSite(site, limit.siteTargets.toList()) != null) return true
         val labels = site.lowercase().split('.').dropLast(1)
         return limit.names.any { n -> NOT_LETTERS.replace(n.lowercase(), "").let { it.isNotEmpty() && it in labels } }
     }
@@ -205,11 +209,15 @@ class LimitSnapshot(val limits: List<Limit>, val guard: Boolean, val fetched: Lo
                 val others = item.optJSONArray("others")?.let { x ->
                     (0 until x.length()).map { x.getJSONArray(it).let { p -> Iv(p.getLong(0), p.getLong(1)) } }
                 } ?: emptyList()
-                val play = "c:play" in strings(l.optJSONArray("targets"))
+                val targets = strings(l.optJSONArray("targets"))
+                val play = "c:play" in targets || "g:phone" in targets
+                val directApps = targets.filter { it.startsWith("a:") }.map { it.substring(2) }
+                val directSites = targets.filter { it.startsWith("s:") }.map { it.substring(2) }
                 val openUntil = item.optJSONObject("unlock")?.let { if (it.isNull("open_until")) null else it.optLong("open_until") }
                 out.add(Limit(l.getString("id"), item.optString("label").ifEmpty { "This app" }, rules, unlock,
-                    strings(m.optJSONArray("apps")).toSet() + (if (play) games else emptySet()),
-                    strings(m.optJSONArray("sites")).toSet(), strings(m.optJSONArray("names")), others, openUntil))
+                    strings(m.optJSONArray("apps")).toSet() + directApps + (if (play) games else emptySet()),
+                    strings(m.optJSONArray("sites")).toSet() + directSites, strings(m.optJSONArray("names")), others, openUntil,
+                    directSites.toSet()))
             }
             val s = o.optJSONObject("settings") ?: JSONObject()
             return LimitSnapshot(out, s.optBoolean("guard", true), fetched)

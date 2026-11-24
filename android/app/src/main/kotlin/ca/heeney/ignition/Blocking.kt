@@ -1,15 +1,10 @@
 package ca.heeney.ignition
 
-import org.json.JSONObject
-
 /**
- * The shared block list (settings.block) and the rules for matching it, kept free of Android classes so
- * it can be unit-tested. Sites match their subdomains too; a site with a port only matches that port.
+ * Site matching for limits, kept free of Android classes so it can be unit-tested. Sites match their
+ * subdomains too; a site with a port only matches that port.
  */
 object Blocking {
-    class Config(val sites: List<String>, val apps: Map<String, String>, val games: Boolean) {
-        val empty get() = sites.isEmpty() && apps.isEmpty() && !games
-    }
 
     /** Other domains that belong to a site (subdomains are always covered). Mirrors the enforcer. */
     private val ALIASES = mapOf(
@@ -34,20 +29,6 @@ object Blocking {
     }
     private val URL_BAR_WORDS = Regex("url|address|omnibar|omnibox|location_bar|origin_view", RegexOption.IGNORE_CASE)
     private val NOT_URL_BAR = Regex("suggest|clear|button|icon|menu|qr|mic|voice|tabs|counter", RegexOption.IGNORE_CASE)
-
-    fun config(settings: JSONObject): Config {
-        val b = settings.optJSONObject("block") ?: JSONObject()
-        val sites = b.optJSONArray("sites")?.let { a -> (0 until a.length()).mapNotNull { cleanSite(a.optString(it)) } } ?: emptyList()
-        val apps = LinkedHashMap<String, String>()
-        b.optJSONArray("apps")?.let { a ->
-            for (i in 0 until a.length()) {
-                val o = a.optJSONObject(i) ?: continue
-                val id = o.optString("id")
-                if (id.isNotEmpty()) apps[id] = o.optString("label", id).ifEmpty { id }
-            }
-        }
-        return Config(sites, apps, b.optBoolean("games"))
-    }
 
     /** "https://www.YouTube.com/watch?v=x" -> "youtube.com"; null if it doesn't look like a site. */
     fun cleanSite(value: String): String? {

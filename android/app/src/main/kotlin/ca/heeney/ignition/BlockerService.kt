@@ -24,8 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * The phone's half of the lockout (the enforcer does computers). One accessibility service does it all:
  *
- * - While a burn is active it sends you home from a blocked app, or a blocked site in a browser.
- * - Whenever a limit is closed it stands in front of what that limit covers, with ignition's Limits page.
+ * - Whenever a limit is closed, including one that applies only while burning, it stands in front of
+ *   what that limit covers with ignition's Limits page.
  * - It notes which site each browser shows (the domain only), so screen time and limits can tell sites apart.
  * - While limits are on, or a burn is, it stands in front of the pages that would switch it off: ignition's
  *   App info, its accessibility and usage access switches, the uninstall dialog and the clock settings.
@@ -35,12 +35,8 @@ import java.util.concurrent.ConcurrentHashMap
  * the domains it notes are kept, and they go only to your own server.
  */
 class BlockerService : AccessibilityService() {
-    private var games: Set<String> = emptySet()
-    private var gamesAt = 0L
     private val browsers = HashMap<String, Boolean>()
     private var keyboards: Set<String> = emptySet()
-    private var lastKick = 0L
-    private var lastKicked = ""
     private val main = Handler(Looper.getMainLooper())
     private val worker = Handler(HandlerThread("ignition-limits").apply { start() }.looper)
     /** The app in front, as far as limits go. */
@@ -66,7 +62,6 @@ class BlockerService : AccessibilityService() {
         keyboards = runCatching {
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).inputMethodList.map { it.packageName }.toSet()
         }.getOrDefault(emptySet())
-        refreshGames(true)
         LimitStore.fetchSoon(this, 0)
         checkForeground()
         lookIn(LOOK_MS)
@@ -102,7 +97,6 @@ class BlockerService : AccessibilityService() {
         val arrived = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != "com.android.systemui" &&
             pkg !in keyboards && pkg != front
         if (arrived) front = pkg
-        check(pkg)
         if (arrived) checkLimits()
     }
 
@@ -115,11 +109,10 @@ class BlockerService : AccessibilityService() {
         foregroundPackage()?.let { takeFront(it) }
     }
 
-    /** [pkg] is in front now: the burn, then the site a browser shows, then the limits. */
+    /** [pkg] is in front now: note the site a browser shows, then check the limits. */
     private fun takeFront(pkg: String) {
         front = pkg
-        check(pkg) // a burn sends it home, which clears front
-        if (front == pkg && isBrowser(pkg)) noteSite(pkg)
+        if (isBrowser(pkg)) noteSite(pkg)
         checkLimits()
     }
 
@@ -171,43 +164,6 @@ class BlockerService : AccessibilityService() {
         return synchronized(store) { Logic.current(store).phase == "burning" }
     }
 
-    /** The burn's block list. */
-    private fun check(pkg: String) {
-        if (pkg == PACKAGE || pkg == "com.android.systemui" || pkg.isEmpty()) return
-
-        val store = Store.get(this)
-        val cfg: Blocking.Config
-        val sites: List<String>
-        synchronized(store) {
-            if (Logic.current(store).phase != "burning") return
-            cfg = Blocking.config(store.settings)
-            sites = cfg.sites
-        }
-        if (cfg.empty) return
-
-        // A blocked app in front: home, every time it's opened.
-        if (cfg.apps.containsKey(pkg) || (cfg.games && isGame(pkg))) {
-            kick(cfg.apps[pkg] ?: appLabel(pkg))
-            return
-        }
-        // A blocked site in a browser's address bar.
-        if (sites.isNotEmpty() && isBrowser(pkg)) {
-            val site = addressBarText(pkg)?.let { Blocking.blockedSiteIn(it, sites) } ?: return
-            kick(site)
-        }
-    }
-
-    private fun kick(what: String) {
-        // Gone home, or about to be: if it comes back without a window event, the next look sees it again.
-        front = ""
-        val now = SystemClock.uptimeMillis()
-        if (what == lastKicked && now - lastKick < 1500) return // one window change fires several events
-        lastKick = now
-        lastKicked = what
-        performGlobalAction(GLOBAL_ACTION_HOME)
-        Toast.makeText(this, "$what is blocked while you're burning.", Toast.LENGTH_SHORT).show()
-    }
-
     // ---- limits
 
     /** Is what's in front over a limit? If not, look again when the nearest one could run out. */
@@ -221,6 +177,10 @@ class BlockerService : AccessibilityService() {
         val site = showing[pkg] ?: ""
         val covering = snap.limits.filter { Limits.covers(it, pkg, site) }
         if (covering.isEmpty()) return
+        val store = Store.get(this)
+        val current = synchronized(store) { Logic.current(store) }
+        val burning = current.phase == "burning"
+        val burnEndsAt = if (burning) current.session!!.optLong("ends_at") * 1000 else null
         // Reading the usage log takes a moment: not on the thread that hears about windows.
         worker.post {
             val now = System.currentTimeMillis()
@@ -230,11 +190,11 @@ class BlockerService : AccessibilityService() {
             var warn: Limit? = null
             for (limit in covering) {
                 val open = (limit.openUntil ?: 0) - now
-                if (open > 0) {
+                if (open > 0 && limit.rules.none { it.kind == "burn" }) {
                     next = minOf(next, open + 500)
                     continue
                 }
-                val state = Limits.evaluate(limit, Limits.usage(limit, own), now)
+                val state = Limits.evaluate(limit, Limits.usage(limit, own), now, burning = burning, burnEndsAt = burnEndsAt)
                 if (state.blocked) {
                     over = limit
                     break
@@ -281,12 +241,14 @@ class BlockerService : AccessibilityService() {
 
     /** Notes the site a browser shows, for screen time, and looks at the limits again if it changed. */
     private fun noteSite(pkg: String) {
-        val host = addressBarText(pkg)?.let { Sites.hostIn(it) } ?: return
+        val text = addressBarText(pkg) ?: return
+        val host = Sites.hostIn(text, keepPort = true) ?: return
         if (showing.put(pkg, host) != host && pkg == front) checkLimits()
-        if (lastMark[pkg] == host) return
-        lastMark[pkg] = host
+        val recorded = Sites.hostIn(text) ?: return
+        if (lastMark[pkg] == recorded) return
+        lastMark[pkg] = recorded
         val app = applicationContext
-        val mark = Mark(System.currentTimeMillis(), pkg, host)
+        val mark = Mark(System.currentTimeMillis(), pkg, recorded)
         worker.post { SiteLog.add(app, mark) }
     }
 
@@ -374,25 +336,6 @@ class BlockerService : AccessibilityService() {
             for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
         }
         return field
-    }
-
-    // ---- "every game"
-
-    private fun isGame(pkg: String): Boolean {
-        refreshGames(false)
-        return pkg in games
-    }
-
-    private fun refreshGames(force: Boolean) {
-        if (!force && SystemClock.elapsedRealtime() - gamesAt < 10 * 60_000L) return
-        gamesAt = SystemClock.elapsedRealtime()
-        games = gamePackages(this)
-    }
-
-    private fun appLabel(pkg: String): String = try {
-        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
-    } catch (e: PackageManager.NameNotFoundException) {
-        pkg
     }
 
     companion object {

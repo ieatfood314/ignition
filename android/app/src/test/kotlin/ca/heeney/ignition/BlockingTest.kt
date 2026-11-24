@@ -1,7 +1,5 @@
 package ca.heeney.ignition
 
-import org.json.JSONArray
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -68,23 +66,5 @@ class BlockingTest {
         assertFalse(Blocking.isUrlBarId("com.android.chrome:id/url_action_button"))
         assertFalse(Blocking.isUrlBarId("top_sites_list.top_site_item"))
         assertFalse(Blocking.isUrlBarId(null))
-    }
-
-    @Test
-    fun configReadsBlockDocument() {
-        val settings = Logic.cleanSettings(
-            JSONObject().put(
-                "block",
-                JSONObject()
-                    .put("sites", JSONArray().put("https://www.YouTube.com"))
-                    .put("apps", JSONArray().put(JSONObject().put("id", "com.termux").put("label", "Termux")))
-                    .put("games", true),
-            ),
-        )
-        val cfg = Blocking.config(settings)
-        assertEquals(listOf("youtube.com"), cfg.sites)
-        assertEquals("Termux", cfg.apps["com.termux"])
-        assertTrue(cfg.games)
-        assertFalse(cfg.empty)
     }
 }

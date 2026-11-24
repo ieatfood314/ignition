@@ -45,7 +45,6 @@ DEFAULT_LAUNCH_WINDOW = {
 DEFAULT_SETTINGS = {
     "goals": {"daily": 0, "weekly": 0},
     "schedules": [],
-    "block": {"sites": [], "apps": [], "games": False, "programs": [], "pc_games": False},
     "launch_window": DEFAULT_LAUNCH_WINDOW,
     "end_early_over": END_EARLY_OVER,
 }
@@ -218,18 +217,6 @@ def clean_block(body):
             "pc_games": bool(body.get("pc_games"))}
 
 
-def ratchet_block(old, new):
-    """The block list while it's locked: whatever [new] adds, plus everything [old] had. Nothing comes off."""
-    out = {k: list(new[k]) for k in ("sites", "programs")}
-    for k in ("sites", "programs"):
-        out[k] += [v for v in old[k] if v not in out[k]]
-    ids = {a["id"] for a in new["apps"]}
-    out["apps"] = list(new["apps"]) + [a for a in old["apps"] if a["id"] not in ids]
-    for k in ("games", "pc_games"):
-        out[k] = new[k] or old[k]
-    return out
-
-
 def clean_launch_window(body):
     d = DEFAULT_LAUNCH_WINDOW
     return {
@@ -258,7 +245,6 @@ def clean_settings(body):
             "enabled": bool(sc.get("enabled", True)),
         })
     s["schedules"] = scheds
-    s["block"] = clean_block(body.get("block") or {})
     s["launch_window"] = clean_launch_window(body.get("launch_window") or {})
     over = body.get("end_early_over")
     s["end_early_over"] = clamp_int(END_EARLY_OVER if over is None else over, 0, MAX_MINUTES, END_EARLY_OVER)
@@ -314,13 +300,17 @@ class App:
             return clean_settings({}), 0
         return clean_settings(json.loads(row[0]["value"])), row[0]["updated_at"]
 
+    def legacy_block(self):
+        """The old burn block list, read before one-time migration into the limits database."""
+        row = self.s.q("SELECT value FROM kv WHERE key='settings'")
+        return clean_block((json.loads(row[0]["value"]).get("block") or {}) if row else {})
+
     def put_settings(self, body, updated_at=None):
         value = clean_settings(body)
         with self.s.lock:
             if self.block_locked():
                 # Mid-burn, ending early can only get harder.
                 old = self.settings()[0]
-                value["block"] = ratchet_block(old["block"], value["block"])
                 value["end_early_over"] = max(old["end_early_over"], value["end_early_over"])
             self.s.x(
                 "INSERT INTO kv (key, value, updated_at, rev) VALUES ('settings', ?, ?, ?) "
@@ -353,8 +343,8 @@ class App:
         return (row["planned"] or row["minutes"]) > self.settings()[0]["end_early_over"]
 
     def block_locked(self, t=None):
-        """While a burn is on, or its countdown can no longer be scrubbed, the block list only grows:
-        taking a site off it mid-burn would be a way out."""
+        """While a burn is on, or its countdown can no longer be scrubbed, ending early can only get
+        harder and burn limits can only grow: loosening one would be a way out."""
         t = t or now()
         phase, row = self.current(t)
         return phase == "burning" or (phase == "countdown" and t >= self.scrub_until(row))
@@ -574,9 +564,7 @@ class App:
             "ON CONFLICT(host) DO UPDATE SET last_seen=excluded.last_seen, status=excluded.status",
             (host, now(), status),
         )
-        block = self.settings()[0]["block"]
-        out = {**self.ignite_state(), "block": {"sites": block["sites"], "programs": block["programs"],
-                                                    "games": block["pc_games"]}}
+        out = self.ignite_state()
         if self.screen:
             # Limits hold on computers too: what's over its limit right now, burn or not.
             out["limit_block"] = self.screen.enforce()

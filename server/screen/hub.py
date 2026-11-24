@@ -21,7 +21,7 @@ ENFORCE_TTL = 3  # seconds an answer to "what do computers block" is reused; eve
 
 class Screen:
     def __init__(self, db_path, ignition):
-        """`ignition` is the server's App: burns and the block list come straight from it."""
+        """`ignition` is the server's App: burns and settings come straight from it."""
         self.path = str(db_path)
         self.db = core.open_db(self.path)
         self.lock = threading.RLock()
@@ -29,6 +29,39 @@ class Screen:
         self.ig = ignition
         self._enforce = (0, None)
         self._first_day = None
+        self.migrate_burn_block()
+
+    def migrate_burn_block(self):
+        """Move the old settings.block into ordinary burn limits, once."""
+        if self.ig is None or core.kv_get(self.db, "burn_block_migrated"):
+            return
+        block = self.ig.legacy_block()
+        targets, labels = [], {}
+        for site in block["sites"]:
+            targets.append("s:" + site)
+            labels["s:" + site] = site
+        for app in block["apps"]:
+            target = "a:" + app["id"]
+            targets.append(target)
+            labels[target] = app["label"]
+        for program in block["programs"]:
+            targets.append("p:" + program)
+            labels["p:" + program] = program
+        for on, target, name in ((block["games"], "g:phone", "Phone games"),
+                                 (block["pc_games"], "g:computer", "Computer games")):
+            if on:
+                targets.append(target)
+                labels[target] = name
+        with self.lock:
+            for start in range(0, len(targets), 60):
+                part = targets[start:start + 60]
+                limits.save(self.db, {"id": "l-burning" if start == 0 else None,
+                                      "name": "Burn blocklist" + (f" {start // 60 + 1}" if start else ""),
+                                      "targets": part, "labels": {t: labels[t] for t in part},
+                                      "rules": [{"kind": "burn"}], "unlock": None})
+            self.ig.put_settings(self.ig.settings()[0])
+            core.kv_set(self.db, "burn_block_migrated", 1)
+            self.db.commit()
 
     # -- importing lightcurve's record --
 
@@ -72,13 +105,33 @@ class Screen:
         return self.ig.burns()["burns"]
 
     def block(self):
-        return self.ig.settings()[0]["block"]
+        """Burn targets in the shape the screen-time blocked markers use."""
+        out = {"sites": [], "apps": [], "programs": [], "games": False, "pc_games": False}
+        with self.lock:
+            rows = limits.rows(self.db, live=self.live())
+        for row in rows:
+            lim = row["limit"]
+            if not any(r["kind"] == "burn" for r in lim["rules"]):
+                continue
+            for t in lim["targets"]:
+                if t.startswith("s:"):
+                    out["sites"].append(t[2:])
+                elif t.startswith("a:"):
+                    out["apps"].append({"id": t[2:], "label": (lim.get("labels") or {}).get(t, t[2:])})
+                elif t.startswith("p:"):
+                    out["programs"].append(t[2:])
+            out["games"] = out["games"] or "g:phone" in lim["targets"] or "c:play" in lim["targets"]
+            out["pc_games"] = out["pc_games"] or "g:computer" in lim["targets"] or "c:play" in lim["targets"]
+        return out
 
     def live(self):
+        if self.ig is None:
+            return None
         st = self.ig.ignite_state()
         if st.get("phase") in ("burning", "countdown") and st.get("session"):
             s = st["session"]
-            return {"phase": st["phase"], "starts_at": s.get("starts_at"), "ends_at": s.get("ends_at")}
+            return {"phase": st["phase"], "starts_at": s.get("starts_at"), "ends_at": s.get("ends_at"),
+                    "locked": self.ig.block_locked()}
         return None
 
     def status(self):
@@ -86,24 +139,29 @@ class Screen:
 
     def add_block(self, body):
         kind, value = body.get("list"), str(body.get("value") or "").strip()
-        if kind not in ("sites", "apps", "programs"):
+        prefixes = {"sites": "s:", "apps": "a:", "programs": "p:"}
+        if kind not in prefixes:
             raise ValueError("list must be sites, apps or programs")
         if not value:
             raise ValueError("Nothing to block.")
-        settings = self.ig.settings()[0]
-        current = settings["block"].setdefault(kind, [])
-        if kind == "apps":
-            if not any(a.get("id") == value for a in current):
-                current.append({"id": value, "label": str(body.get("label") or value)[:80]})
-        elif value not in current:
-            current.append(value)
-        saved = self.ig.put_settings(settings)["block"]
-        kept = saved.get(kind, [])
-        ok = any(a.get("id") == value for a in kept) if kind == "apps" else value in kept
-        if not ok:
-            raise ValueError(f"“{value}” doesn't look right. Sites need an address like example.com, "
-                             "programs a command name.")
-        return {"ok": True, "block": saved}
+        with self.lock:
+            rows = limits.rows(self.db)
+            row = next((r for r in rows if r["limit"]["id"] == "l-burning" and len(r["limit"]["targets"]) < 60), None)
+            if row is None:
+                row = next((r for r in rows if any(rule["kind"] == "burn" for rule in r["limit"]["rules"])
+                            and len(r["limit"]["targets"]) < 60), None)
+            if row:
+                lim = row["limit"]
+            else:
+                lim = {"id": "l-burning" if not rows else None, "name": "Burn blocklist", "targets": [], "labels": {},
+                       "rules": [{"kind": "burn"}], "unlock": None}
+            target = prefixes[kind] + value
+            if target not in lim["targets"]:
+                lim["targets"].append(target)
+            lim.setdefault("labels", {})[target] = str(body.get("label") or value)[:80]
+            saved = limits.save(self.db, lim)
+        self.limits_changed()
+        return {"ok": True, "limit": saved["limit"]}
 
     # -- reads --
 
@@ -216,7 +274,7 @@ class Screen:
         if not re.match(r"^n:.{1,200}$", key):
             raise ValueError("key must look like n:<name>")
         with self.lock:
-            out = limits.set_category(self.db, key, cat)
+            out = limits.set_category(self.db, key, cat, live=self.live())
             self.cache.drop()
         self._enforce = (0, None)
         return out
@@ -312,7 +370,7 @@ class Screen:
             if not any(c["id"] == cat for c in core.category_list(self.db)):
                 raise ValueError("That category was deleted while the AI was thinking.")
             chosen -= set(core.Namer(self.db).overrides)
-            results = limits.set_category_many(self.db, {k: cat for k in chosen})
+            results = limits.set_category_many(self.db, {k: cat for k in chosen}, live=self.live())
             self.cache.drop()
         self._enforce = (0, None)
         return {"ok": True, "cat": cat, "assigned": sum(r["applied"] for r in results.values()),
@@ -343,12 +401,31 @@ class Screen:
                 return {"limits": [], "settings": {**limits.settings(self.db), "guard": False},
                         "now": int(time.time() * 1000), "settings_pending": None, "settings_at": None,
                         "day_start_hour": core.DAY_START_HOUR}
-            r = limits.report(self.db, device=device)
+            r = limits.report(self.db, device=device, live=self.live())
         r["burn"] = self.live()
         return r
 
     def limits_changed(self):
         self._enforce = (0, None)
+
+    def guard_burn_save(self, body):
+        live = self.live()
+        if not live or not live.get("locked"):
+            return
+        new = limits.clean(body, self.db)
+        row = self.db.execute("SELECT body FROM limits WHERE id = ?", (new["id"],)).fetchone()
+        if row:
+            old = json.loads(row[0])
+            if any(r["kind"] == "burn" for r in old["rules"]) and limits.loosens(old, new):
+                raise ValueError("Burn blocks can't be loosened during a burn.")
+
+    def guard_burn_delete(self, lid):
+        live = self.live()
+        if not live or not live.get("locked"):
+            return
+        row = self.db.execute("SELECT body FROM limits WHERE id = ?", (lid,)).fetchone()
+        if row and any(r["kind"] == "burn" for r in json.loads(row[0])["rules"]):
+            raise ValueError("Burn blocks can't be removed during a burn.")
 
     def enforce(self):
         """What computers block for the limits right now (cached for a few seconds)."""
@@ -356,7 +433,7 @@ class Screen:
         if value is not None and time.monotonic() - at < ENFORCE_TTL:
             return value
         with self.lock:
-            value = limits.enforce(self.db)
+            value = limits.enforce(self.db, live=self.live())
         self._enforce = (time.monotonic(), value)
         return value
 
@@ -364,7 +441,7 @@ class Screen:
         """Answers the screen-time and limit endpoints, or returns None if `r` isn't one of them."""
         with_lock = self.lock
         with self.lock:
-            if limits.settle(self.db):  # a waiting change of kind came due: the reports count it now
+            if limits.settle(self.db, live=self.live()):  # a waiting change of kind came due: the reports count it now
                 self.cache.drop()
         if method == "GET":
             if r == ["day"]:
@@ -406,11 +483,11 @@ class Screen:
                 b = body()
                 step = b.get("step")
                 live = self.live()
-                if step in ("start", "open") and live and live["phase"] == "burning":
-                    raise ValueError("No unlocks during a burn.")
+                if step in ("start", "open") and live and live.get("locked"):
+                    raise ValueError("No unlocks during a burn or locked countdown.")
                 with with_lock:
                     if step == "start":
-                        out = limits.start_unlock(self.db, r[1], b.get("device") or "")
+                        out = limits.start_unlock(self.db, r[1], b.get("device") or "", live=live)
                     elif step == "open":
                         out = limits.open_unlock(self.db, str(b.get("id") or ""))
                     elif step == "cancel":
@@ -433,22 +510,25 @@ class Screen:
                     if b.get("cancel"):
                         out = limits.cancel_settings(self.db)
                     elif b.get("dry"):
-                        out = limits.settings_would_wait(self.db, b)
+                        out = limits.settings_would_wait(self.db, b, live=self.live())
                     else:
-                        out = limits.save_settings(self.db, b)
+                        out = limits.save_settings(self.db, b, live=self.live())
                 self.limits_changed()
                 return out
             if r == ["limits"]:
                 b = body()
+                self.guard_burn_save(b)
                 with with_lock:
-                    out = limits.would_wait(self.db, b) if b.get("dry") else limits.save(self.db, b)
+                    out = (limits.would_wait(self.db, b, live=self.live()) if b.get("dry")
+                           else limits.save(self.db, b, live=self.live()))
                 self.limits_changed()
                 return out
             return None
         if method == "DELETE":
             if len(r) == 2 and r[0] == "limits":
+                self.guard_burn_delete(r[1])
                 with with_lock:
-                    out = limits.delete(self.db, r[1])
+                    out = limits.delete(self.db, r[1], live=self.live())
                 self.limits_changed()
                 return out
             return None

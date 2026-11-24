@@ -614,9 +614,9 @@ for (const el of [$("#sc-chart")]) {
 
 /* ---- the Limits tab ---- */
 
-const RULE_KINDS = { day: "Time per day", every: "Time per X hours", block: "Blocked hours" };
+const RULE_KINDS = { day: "Time per day", every: "Time per X hours", block: "Blocked hours", burn: "Blocked while burning" };
 const RULE_DEFAULTS = {
-  day: { minutes: 60 }, every: { minutes: 30, hours: 4 }, block: { from: "22:00", to: "07:00" },
+  day: { minutes: 60 }, every: { minutes: 30, hours: 4 }, block: { from: "22:00", to: "07:00" }, burn: {},
 };
 const DEFAULT_UNLOCK = { hold: 5, wait: 3, grant: 10, per_day: null };
 
@@ -633,6 +633,7 @@ function daysText(days) {
 }
 function ruleText(r) {
   const on = daysText(r.days);
+  if (r.kind === "burn") return "Blocked while burning";
   if (r.kind === "day") return r.minutes ? `Up to ${minText(r.minutes)} a day${on}` : `Blocked all day${on}`;
   if (r.kind === "every") return `Up to ${minText(r.minutes)} every ${r.hours === 1 ? "hour" : `${r.hours} hours`}`;
   return r.from === r.to ? `Blocked all day${on}` : `Blocked from ${r.from} to ${r.to}${on}`;
@@ -763,6 +764,7 @@ const deviceTag = () => (NATIVE ? "phone" : "web");
 /* the changes box: how long a loosening waits, and the phone's guard */
 function renderLimitSettings(L) {
   $("#lim-settings").hidden = false;
+  $("#lim-loosening").hidden = !!L.local;
   const s = L.settings;
   const w = $("#lim-wait");
   if (document.activeElement !== w && !limSetDirty) w.value = s.changes_wait;
@@ -805,7 +807,7 @@ const limitDialog = $("#limit-dialog");
 let draft = null, editing = null;
 
 function newRule(kind) {
-  return kind === "every" ? { kind, ...RULE_DEFAULTS[kind] } : { kind, ...RULE_DEFAULTS[kind], days: [...ALL_DAYS] };
+  return ["day", "block"].includes(kind) ? { kind, ...RULE_DEFAULTS[kind], days: [...ALL_DAYS] } : { kind, ...RULE_DEFAULTS[kind] };
 }
 
 async function openLimit(item) {
@@ -829,10 +831,16 @@ async function openLimit(item) {
   $("#lim-known").innerHTML = (sc.range ? sc.range.census : []).filter((e) => e.key).slice(0, 300).map((e) => `<option value="${esc(e.label)}">`).join("");
 }
 
+function targetLabel(t) {
+  return { "g:phone": "Every game on phones", "g:computer": "Every game on computers" }[t] || draft.labels[t] || t.slice(2);
+}
+
 function drawTargets() {
   $("#lim-cats").innerHTML = CATS.map((c) => `<button type="button" data-cat="${esc(c)}" class="${draft.targets.includes(`c:${c}`) ? "on" : ""}" title="${esc(CAT_ABOUT[c] || catName(c))}">${keyDot(c)}${esc(catName(c))}</button>`).join("");
-  $("#lim-things").innerHTML = draft.targets.filter((t) => t.startsWith("n:")).map((t) =>
-    `<li><span class="tag-label">${esc(draft.labels[t] || t.slice(2))}</span><button type="button" class="tag-x" data-t="${esc(t)}" aria-label="Remove ${esc(draft.labels[t] || t.slice(2))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button></li>`).join("");
+  $("#lim-games").innerHTML = [["g:phone", "Phone games"], ["g:computer", "Computer games"]].map(([t, name]) =>
+    `<button type="button" data-target="${t}" class="${draft.targets.includes(t) ? "on" : ""}">${name}</button>`).join("");
+  $("#lim-things").innerHTML = draft.targets.filter((t) => !t.startsWith("c:") && !t.startsWith("g:")).map((t) =>
+    `<li><span class="tag-label">${esc(targetLabel(t))}</span><button type="button" class="tag-x" data-t="${esc(t)}" aria-label="Remove ${esc(targetLabel(t))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button></li>`).join("");
 }
 $("#lim-cats").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-cat]");
@@ -845,22 +853,87 @@ $("#lim-things").addEventListener("click", (e) => {
   const b = e.target.closest(".tag-x");
   if (b) { draft.targets = draft.targets.filter((x) => x !== b.dataset.t); drawTargets(); }
 });
+$("#lim-games").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-target]");
+  if (!b) return;
+  const t = b.dataset.target;
+  draft.targets = draft.targets.includes(t) ? draft.targets.filter((x) => x !== t) : [...draft.targets, t];
+  drawTargets();
+});
+
+function cleanTargetSite(v) {
+  let s = v.trim().toLowerCase().replace(/^[a-z]+:\/\//, "").split(/[/?#]/)[0].split("@").pop().replace(/^\.+|\.+$/g, "");
+  if (s.startsWith("www.")) s = s.slice(4);
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(s) ? s : null;
+}
+
 $("#lim-add").addEventListener("submit", (e) => {
   e.preventDefault();
   const input = $("input", e.target), v = input.value.trim();
   if (!v) return;
   const hit = (sc.range ? sc.range.census : []).find((x) => x.key && x.label.toLowerCase() === v.toLowerCase());
-  const k = hit ? hit.key : `n:${v.toLowerCase()}`;
+  const site = cleanTargetSite(v);
+  const tlds = new Set(["com", "net", "org", "io", "dev", "app", "ca", "tv", "me", "co", "uk", "de", "us", "info", "xyz"]);
+  const pkg = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(v) && !tlds.has(v.split(".").pop().toLowerCase());
+  const k = hit ? hit.key : pkg ? `a:${v}` : site ? `s:${site}` : `n:${v.toLowerCase()}`;
   if (!draft.targets.includes(k)) draft.targets.push(k);
-  draft.labels[k] = hit ? hit.label : v;
+  draft.labels[k] = hit ? hit.label : site || v;
   input.value = "";
   drawTargets();
 });
+$("#lim-add-program").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = $("input", e.target), v = input.value.trim();
+  if (!/^[A-Za-z0-9._+-]{1,64}$/.test(v)) { toast("Use a program name like steam or vlc."); return; }
+  const k = `p:${v}`;
+  if (!draft.targets.includes(k)) draft.targets.push(k);
+  draft.labels[k] = v;
+  input.value = "";
+  drawTargets();
+});
+
+let installedApps = null;
+const limitAppDialog = $("#limit-app-dialog");
+async function openAppPicker() {
+  limitAppDialog.showModal();
+  if (!installedApps) {
+    $("#app-pick").innerHTML = `<li class="hint">Loading…</li>`;
+    await new Promise((r) => setTimeout(r, 30));
+    try { installedApps = await api("GET", "/native/apps"); }
+    catch (e) { $("#app-pick").innerHTML = `<li class="hint">${esc(e.message)}</li>`; return; }
+  }
+  $("#app-search").value = "";
+  renderAppPicker();
+}
+function renderAppPicker() {
+  if (!installedApps || !draft) return;
+  const q = $("#app-search").value.trim().toLowerCase();
+  const chosen = new Set(draft.targets.filter((t) => t.startsWith("a:")).map((t) => t.slice(2)));
+  const list = installedApps.filter((a) => !q || a.label.toLowerCase().includes(q) || a.id.includes(q));
+  $("#app-pick").innerHTML = list.map((a) => `
+    <li><label><input type="checkbox" data-id="${esc(a.id)}" ${chosen.has(a.id) ? "checked" : ""}>
+      <span>${esc(a.label)}${a.game ? ' <em class="game">game</em>' : ""}<small>${esc(a.id)}</small></span></label></li>`).join("");
+  $$("#app-pick input").forEach((cb) => cb.onchange = () => {
+    const app = installedApps.find((a) => a.id === cb.dataset.id), t = `a:${app.id}`;
+    draft.targets = draft.targets.filter((x) => x !== t);
+    if (cb.checked) draft.targets.push(t);
+    draft.labels[t] = app.label;
+    drawTargets();
+  });
+}
+$("#lim-choose-apps").onclick = openAppPicker;
+$("#app-search").addEventListener("input", renderAppPicker);
+$("#limit-app-close").onclick = () => limitAppDialog.close();
 
 function drawRules() {
   const host = $("#lim-rules");
   host.innerHTML = "";
   draft.rules.forEach((r, i) => host.append(ruleRow(r, i)));
+  const burn = draft.rules.some((r) => r.kind === "burn");
+  $("#lim-block-lock").hidden = !blockLocked() || !burn;
+  $("#lim-unlock-heading").hidden = burn;
+  $("#lim-unlock-toggle").hidden = burn;
+  $("#lim-unlock").hidden = burn;
   $("#lim-add-rule").innerHTML = Object.entries(RULE_KINDS).map(([k, v]) => `<button type="button" data-kind="${k}">+ ${v}</button>`).join("");
 }
 $("#lim-add-rule").addEventListener("click", (e) => {
@@ -875,6 +948,7 @@ function ruleRow(r, i) {
   const time = (k, label) => `<input type="time" data-k="${k}" value="${r[k]}" step="60" aria-label="${label}">`;
   const allDay = r.kind === "block" && r.from === r.to;
   let f = "";
+  if (r.kind === "burn") f = `<span>Blocked while burning</span>`;
   if (r.kind === "day") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min a day</span>`;
   if (r.kind === "every") f = `<span>Up to</span>${num("minutes", 0, 1440, "Minutes")}<span>min every</span>${num("hours", 1, 24, "Hours")}<span>hours</span>`;
   if (r.kind === "block") f = allDay ? `<span>Blocked all day</span>` : `<span>Blocked from</span>${time("from", "From")}<span>to</span>${time("to", "To")}`;
@@ -911,7 +985,7 @@ function limitBody() {
   const n = (id, min, max) => { const v = parseInt($(id).value, 10); return Number.isNaN(v) ? null : Math.max(min, Math.min(max, v)); };
   return {
     ...draft, name: $("#lim-name").value.trim(),
-    unlock: $("#lim-unlock-on").checked ? { hold: n("#lim-hold", 1, 60) ?? 5, wait: n("#lim-uwait", 0, 240) ?? 0, grant: n("#lim-grant", 1, 240) ?? 10, per_day: n("#lim-perday", 1, 50) } : null,
+    unlock: !draft.rules.some((r) => r.kind === "burn") && $("#lim-unlock-on").checked ? { hold: n("#lim-hold", 1, 60) ?? 5, wait: n("#lim-uwait", 0, 240) ?? 0, grant: n("#lim-grant", 1, 240) ?? 10, per_day: n("#lim-perday", 1, 50) } : null,
   };
 }
 
@@ -1006,7 +1080,7 @@ $("#devices").addEventListener("change", async (e) => {
 /* ---- hooks into app.js ---- */
 window.screenPage = (page) => {
   if (page === "screen") { renderScreen(); loadScreen(); }
-  if (page === "limits") { renderLimits(); loadLimits(); }
+  if (page === "limits") { renderLimits(); loadLimits(); if (NATIVE) loadAppInfo(); }
   if (page === "settings") loadDevices();
 };
 window.screenRefresh = () => {

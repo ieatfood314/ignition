@@ -101,8 +101,8 @@ object Sync {
                     store.settingsUpdatedAt = at
                     store.settingsDirty = false
                     if (locked.toString() != value.toString()) {
-                        // A burn the server didn't know about yet: keep what it tried to unblock, and
-                        // send the list back so the server keeps it too.
+                        // A burn the server didn't know about yet: keep its stricter end-early setting
+                        // and send it back so the server keeps it too.
                         store.settingsUpdatedAt = at + 1
                         store.settingsDirty = true
                     }

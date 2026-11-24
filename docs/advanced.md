@@ -141,7 +141,7 @@ exists) run `openrgb-ram repaint` instead, which needs no root.
 ### How the lockout works on computers
 
 Each computer runs `ignition-enforcer` as root. Every few seconds it sends a heartbeat to the server, which
-replies with the current session and the shared block list. The Ignite page shows each enforcer as
+replies with the current session and the closed limits, including burn-only ones. The Ignite page shows each enforcer as
 *ready*, *locked* or *offline*. While a burn is active (not during a T-minus) it:
 
 - points **blocked sites** at `0.0.0.0` in `/etc/hosts`, along with common subdomains and sister domains. The
@@ -161,7 +161,7 @@ replies with the current session and the shared block list. The Ignite page show
   Connect's `cloudflared` runs inside the server's cgroup and would otherwise let remote clients in;
 - runs the **burn/idle hooks**.
 
-The session and block list are cached in `/var/lib/ignition/state.json` (paused processes in
+The session and limits are cached in `/var/lib/ignition/state.json` (paused processes in
 `frozen.json`), so blocks hold until the end time even if the server is unreachable. Stopping the enforcer
 cleanly lifts everything and resumes what it paused:
 
@@ -187,7 +187,7 @@ the UI. Custom categories also work as limit targets. Days run from 04:00 to 04:
   you, so stopping it stops that computer's time from counting (limits already closed still block).
 
 **Limits** live on the server, which evaluates them over every device's time. A rule is `day`
-(minutes a day), `every` (minutes in any N hours, rolling) or `block` (blocked between two times; the same time at both ends is all day). The same
+(minutes a day), `every` (minutes in any N hours, rolling), `block` (blocked between two times; the same time at both ends is all day) or `burn` (blocked while burning). Burn-only limits also work locally on a standalone phone and upload when it connects to a server. The same
 rules are in `server/screen/limits.py` and the app's `Limits.kt`. Loosening a limit or its settings waits
 `changes_wait` minutes; tightening is immediate.
 
@@ -309,7 +309,7 @@ The server's screen-time and limit rules have their own tests: `python3 -m unitt
 
 `GET /api/ignite`, `POST /api/ignite` (`minutes`,
 `delay`), `POST /api/ignite/{stop,scrub,now,extend,skip}`, `GET/PUT /api/settings` (goals, schedules,
-block, launch_window, end_early_over), `GET /api/stats`, `GET /api/burns` (every burn, for the Stats page), `POST /api/sync`, `GET /api/ping`,
+launch_window, end_early_over), `GET /api/stats`, `GET /api/burns` (every burn, for the Stats page), `POST /api/sync`, `GET /api/ping`,
 `POST /api/enforcer/heartbeat`.
 
 Screen time: `POST /api/ingest` (a device's spans), `GET /api/day` (`date`, `device`), `GET /api/range`

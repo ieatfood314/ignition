@@ -5,6 +5,7 @@ A limit covers some things (by name, `n:youtube`, or by category, `c:play`) and 
     {"kind": "day",   "minutes": 60, "days": [0..6]}                    up to 60 min a day
     {"kind": "every", "minutes": 30, "hours": 4}                        up to 30 min in any 4 hours (rolling)
     {"kind": "block", "from": "22:00", "to": "07:00", "days": [...]}    blocked between (from == to: all day)
+    {"kind": "burn"}                                                     blocked while a burn is active
 
 Days are Python weekdays (0 is Monday). A "day" rule follows lightcurve's day (04:00 to 04:00); blocked
 hours belong to the weekday it starts on. Time on every device counts, two at once counted once.
@@ -23,7 +24,7 @@ import datetime as dt
 
 from . import core, link
 
-KINDS = ("day", "every", "block")
+KINDS = ("day", "every", "block", "burn")
 ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 HORIZON = 25 * 3600  # no rule looks further back than a day
 REOPEN = 300  # a rolling limit opens again once this much (or the whole allowance, if smaller) is free
@@ -64,6 +65,8 @@ def clean_rule(r):
     if not isinstance(r, dict) or r.get("kind") not in KINDS:
         raise ValueError("a rule needs a kind: " + ", ".join(KINDS))
     k = r["kind"]
+    if k == "burn":
+        return {"kind": k}
     if k == "day":
         return {"kind": k, "minutes": _int(r.get("minutes"), 0, 1440, "Minutes"), "days": _days(r.get("days"))}
     if k == "every":
@@ -91,7 +94,17 @@ def clean_target(t):
         return t
     if re.match(r"^n:.{1,200}$", t):
         return "n:" + t[2:].lower()
-    raise ValueError("a target looks like n:<name> or c:<category>")
+    if t.startswith("s:"):
+        site = t[2:].lower()
+        if re.match(r"^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$", site):
+            return "s:" + site
+    if t.startswith("a:") and re.match(r"^a:[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$", t):
+        return t
+    if t.startswith("p:") and re.match(r"^p:[A-Za-z0-9._+-]{1,64}$", t):
+        return t
+    if t in ("g:phone", "g:computer"):
+        return t
+    raise ValueError("a target looks like n:<name>, c:<category>, s:<site>, a:<app> or p:<program>")
 
 
 def clean(body, db=None):
@@ -118,10 +131,10 @@ def clean(body, db=None):
         lid = "l-" + secrets.token_hex(4)
     name = str(body.get("name") or "").strip()[:60]
     given = body.get("labels") if isinstance(body.get("labels"), dict) else {}
-    labels = {t: str(given.get(t) or "").strip()[:80] for t in targets if t.startswith("n:")}
+    labels = {t: str(given.get(t) or "").strip()[:80] for t in targets if not t.startswith("c:")}
     labels = {t: v for t, v in labels.items() if v}
-    return {"id": lid, "name": name, "targets": targets, "labels": labels, "rules": rules,
-            "unlock": clean_unlock(body.get("unlock", DEFAULT_UNLOCK))}
+    unlock = None if any(r["kind"] == "burn" for r in rules) else clean_unlock(body.get("unlock", DEFAULT_UNLOCK))
+    return {"id": lid, "name": name, "targets": targets, "labels": labels, "rules": rules, "unlock": unlock}
 
 
 def clean_settings(body, current):
@@ -156,6 +169,8 @@ def _rule_at_least(new, old):
     """Is `new` at least as strict as `old`?"""
     if new["kind"] != old["kind"]:
         return False
+    if new["kind"] == "burn":
+        return True
     if new["kind"] == "day":
         return new["minutes"] <= old["minutes"] and set(new["days"]) >= set(old["days"])
     if new["kind"] == "every":
@@ -217,11 +232,17 @@ def _used(usage, a, b):
     return core.total(core.clip(usage, a, b))
 
 
-def _rule_state(rule, usage, now):
+def _rule_state(rule, usage, now, live=None):
     """{"active", "used", "allowed", "blocked", "until", "left"} for one rule. `left` is how long until it
     blocks if nothing else changes; None when it can't block before something else happens."""
     k = rule["kind"]
     st = {"kind": k, "active": True, "used": 0, "allowed": None, "blocked": False, "until": None, "left": None}
+    if k == "burn":
+        st["active"] = False
+        if live and live.get("phase") == "burning":
+            st["active"] = st["blocked"] = True
+            st["until"] = live.get("ends_at")
+        return st
     if k == "day":
         date = core.day_of(now)
         a, b = core.day_bounds(date)
@@ -268,9 +289,9 @@ def _rule_state(rule, usage, now):
     return st
 
 
-def evaluate(limit, usage, now):
+def evaluate(limit, usage, now, live=None):
     """Where a limit stands. `usage` is the merged time on its targets, in seconds, over the last HORIZON."""
-    rules = [_rule_state(r, usage, now) for r in limit["rules"]]
+    rules = [_rule_state(r, usage, now, live) for r in limit["rules"]]
     blocking = [r for r in rules if r["blocked"]]
     out = {"rules": rules, "blocked": bool(blocking), "until": None, "left": None}
     if blocking:
@@ -284,9 +305,25 @@ def evaluate(limit, usage, now):
 
 # ---- what a limit covers ----
 
-def matches(limit, namer, app, site):
+def _site_matches(target, site):
+    host = site.lower()
+    name, _, port = host.partition(":")
+    base, _, wanted_port = target.partition(":")
+    if wanted_port and wanted_port != port:
+        return False
+    return name == base or name.endswith("." + base)
+
+
+def matches(limit, namer, app, site, platform=None):
     targets = limit["targets"]
-    return namer.key(app, site) in targets or ("c:" + namer.category(app, site)) in targets
+    if namer.key(app, site) in targets or ("c:" + namer.category(app, site)) in targets:
+        return True
+    if site:
+        return any(t.startswith("s:") and _site_matches(t[2:], site) for t in targets)
+    short = app.lower().rsplit(".", 1)[-1]
+    return any((t == "a:" + app and platform != "computer")
+               or (t.startswith("p:") and platform != "phone" and t[2:].lower() in (app.lower(), short))
+               for t in targets)
 
 
 def usage_for(limit, spans, namer, exclude_device=None):
@@ -305,14 +342,20 @@ def settings(db):
     return out
 
 
-def settle(db, now=None):
-    """Apply every waiting change whose time has come."""
+def settle(db, now=None, live=None):
+    """Apply every waiting change whose time has come, except loosening burn blocks mid-burn."""
     now = now if now is not None else time.time()
     ms_now = int(now * 1000)
+    burning = live and (live.get("phase") == "burning" or live.get("locked"))
+    burn_end = int(live["ends_at"] * 1000) if burning else None
     with db:
-        for lid, pending in db.execute(
-                "SELECT id, pending FROM limits WHERE pending IS NOT NULL AND pending_at <= ?", (ms_now,)).fetchall():
-            if pending == "null":
+        for lid, old_body, pending in db.execute(
+                "SELECT id, body, pending FROM limits WHERE pending IS NOT NULL AND pending_at <= ?", (ms_now,)).fetchall():
+            old = json.loads(old_body)
+            new = None if pending == "null" else json.loads(pending)
+            if burning and any(r["kind"] == "burn" for r in old["rules"]) and loosens(old, new):
+                db.execute("UPDATE limits SET pending_at = ? WHERE id = ?", (burn_end, lid))
+            elif pending == "null":
                 db.execute("DELETE FROM limits WHERE id = ?", (lid,))
             else:
                 db.execute("UPDATE limits SET body = ?, pending = NULL, pending_at = NULL, updated = ? WHERE id = ?",
@@ -323,8 +366,18 @@ def settle(db, now=None):
             db.execute("DELETE FROM kv WHERE key IN ('limit_settings_pending', 'limit_settings_at')")
         moved = False
         waiting = json.loads(core.kv_get(db, "category_pending") or "{}")
+        burn_categories = False
+        if burning:
+            for (body,) in db.execute("SELECT body FROM limits"):
+                lim = json.loads(body)
+                if any(r["kind"] == "burn" for r in lim["rules"]) and any(t.startswith("c:") for t in lim["targets"]):
+                    burn_categories = True
+                    break
         for key, (cat, due) in list(waiting.items()):
-            if due <= ms_now:
+            if due <= ms_now and burn_categories:
+                waiting[key] = [cat, burn_end]
+                moved = True
+            elif due <= ms_now:
                 _put_category(db, key, cat)
                 del waiting[key]
                 moved = True
@@ -341,10 +394,10 @@ def _put_category(db, key, cat):
         db.execute("DELETE FROM categories WHERE key = ?", (key,))
 
 
-def set_category_many(db, changes, now=None):
+def set_category_many(db, changes, now=None, live=None):
     """Apply {key: category} together, with the usual wait when anything leaves a limited category."""
     now = now if now is not None else time.time()
-    settle(db, now)
+    settle(db, now, live)
     namer = core.Namer(db)
     since = int((now - _SEEN_DAYS * 86400) * 1000)
     pairs = db.execute("SELECT DISTINCT app, site FROM spans WHERE end > ?", (since,)).fetchall()
@@ -353,6 +406,11 @@ def set_category_many(db, changes, now=None):
         by_key.setdefault(namer.key(app, site), set()).add(namer.category(app, site))
     limited = {t[2:] for row in db.execute("SELECT body FROM limits")
                for t in json.loads(row[0])["targets"] if t.startswith("c:")}
+    burn_limited = {t[2:] for row in db.execute("SELECT body FROM limits")
+                    for t in json.loads(row[0])["targets"] if t.startswith("c:")
+                    and any(r["kind"] == "burn" for r in json.loads(row[0])["rules"])}
+    locked = live and (live.get("phase") == "burning" or live.get("locked"))
+    burn_end = int(live["ends_at"] * 1000) if locked else None
     known = set(core.category_ids(db))
     waiting = json.loads(core.kv_get(db, "category_pending") or "{}")
     at = int(now * 1000) + settings(db)["changes_wait"] * 60_000
@@ -365,7 +423,11 @@ def set_category_many(db, changes, now=None):
             was = set(by_key.get(key, set()))
             if key in namer.overrides:
                 was.add(namer.overrides[key])
-            if any(c in limited and c != new for c in was):
+            leaves_burn = any(c in burn_limited and c != new for c in was)
+            if locked and leaves_burn:
+                waiting[key] = [new, burn_end]
+                out[key] = {"ok": True, "key": key, "cat": new, "applied": False, "at": burn_end}
+            elif any(c in limited and c != new for c in was):
                 waiting[key] = [new, at]
                 out[key] = {"ok": True, "key": key, "cat": new, "applied": False, "at": at}
             else:
@@ -376,13 +438,13 @@ def set_category_many(db, changes, now=None):
     return out
 
 
-def set_category(db, key, cat, now=None):
+def set_category(db, key, cat, now=None, live=None):
     """Put a thing in another kind. Taking it out of a kind a limit covers is a loosening, so it waits like one."""
-    return set_category_many(db, {key: cat}, now)[key]
+    return set_category_many(db, {key: cat}, now, live)[key]
 
 
-def rows(db, now=None):
-    settle(db, now)
+def rows(db, now=None, live=None):
+    settle(db, now, live)
     out = []
     for lid, body, pending, pending_at, created in db.execute(
             "SELECT id, body, pending, pending_at, created FROM limits ORDER BY created"):
@@ -391,21 +453,21 @@ def rows(db, now=None):
     return out
 
 
-def would_wait(db, body, now=None):
+def would_wait(db, body, now=None, live=None):
     """Would saving this have to wait? For the dashboard, which asks for the hold only then."""
     now = now if now is not None else time.time()
-    settle(db, now)
+    settle(db, now, live)
     new = clean(body, db)
     row = db.execute("SELECT body, created FROM limits WHERE id = ?", (new["id"],)).fetchone()
     wait = row is not None and int(now * 1000) - row[1] >= FRESH * 1000 and loosens(json.loads(row[0]), new)
     return {"wait": wait, "minutes": settings(db)["changes_wait"] if wait else 0}
 
 
-def save(db, body, now=None):
+def save(db, body, now=None, live=None):
     """Add or change a limit. Returns {"limit", "applied", "at"}: a change that loosens waits until `at`."""
     now = now if now is not None else time.time()
     ms_now = int(now * 1000)
-    settle(db, now)
+    settle(db, now, live)
     new = clean(body, db)
     row = db.execute("SELECT body, created FROM limits WHERE id = ?", (new["id"],)).fetchone()
     with db:
@@ -423,10 +485,10 @@ def save(db, body, now=None):
         return {"limit": old, "applied": False, "at": at}
 
 
-def delete(db, lid, now=None):
+def delete(db, lid, now=None, live=None):
     now = now if now is not None else time.time()
     ms_now = int(now * 1000)
-    settle(db, now)
+    settle(db, now, live)
     row = db.execute("SELECT created FROM limits WHERE id = ?", (lid,)).fetchone()
     if not row:
         raise ValueError("no such limit")
@@ -446,9 +508,9 @@ def cancel(db, lid):
     return {"ok": True}
 
 
-def save_settings(db, body, now=None):
+def save_settings(db, body, now=None, live=None):
     now = now if now is not None else time.time()
-    settle(db, now)
+    settle(db, now, live)
     old = settings(db)
     new = clean_settings(body, old)
     with db:
@@ -462,8 +524,8 @@ def save_settings(db, body, now=None):
         return {"settings": new, "applied": True, "at": None}
 
 
-def settings_would_wait(db, body):
-    settle(db)
+def settings_would_wait(db, body, live=None):
+    settle(db, live=live)
     old = settings(db)
     wait = settings_loosen(old, clean_settings(body, old))
     return {"wait": wait, "minutes": old["changes_wait"] if wait else 0}
@@ -477,11 +539,11 @@ def cancel_settings(db):
 
 # ---- what the hub hands out ----
 
-def report(db, now=None, device=None):
+def report(db, now=None, device=None, live=None):
     """Every limit with where it stands. With `device`, also what that device needs to keep them: the apps
     and site domains each one covers, and the time other devices have spent on it lately."""
     now = now if now is not None else time.time()
-    listing = rows(db, now)
+    listing = rows(db, now, live)
     namer = core.Namer(db)
     spans = core.load_spans(db, now - HORIZON, now)
     out = []
@@ -492,14 +554,16 @@ def report(db, now=None, device=None):
         since = int((now - 60 * 86400) * 1000)
         sites = {s for (s,) in db.execute("SELECT DISTINCT site FROM spans WHERE site LIKE '%.%' AND end > ?",
                                           (since,))}
+        apps |= {t[2:] for r in listing for t in r["limit"]["targets"] if t.startswith("a:")}
+        sites |= {t[2:] for r in listing for t in r["limit"]["targets"] if t.startswith("s:")}
     for r in listing:
         lim = r["limit"]
         usage = usage_for(lim, spans, namer)
-        item = {**r, "state": evaluate(lim, usage, now), "label": label(lim, db), "unlock": unlock_state(db, lim, now)}
+        item = {**r, "state": evaluate(lim, usage, now, live), "label": label(lim, db), "unlock": unlock_state(db, lim, now)}
         if device:
             item["match"] = {
-                "apps": sorted(a for a in apps if matches(lim, namer, a, "")),
-                "sites": sorted(s for s in sites if matches(lim, namer, "", s)),
+                "apps": sorted(a for a in apps if matches(lim, namer, a, "", "phone")),
+                "sites": sorted(s for s in sites if matches(lim, namer, "", s, "phone")),
                 "names": [t[2:] for t in lim["targets"] if t.startswith("n:")],
             }
             item["others"] = [[int(a * 1000), int(b * 1000)] for a, b in usage_for(lim, spans, namer, device)]
@@ -518,7 +582,8 @@ def label(limit, db=None):
         return limit["name"]
     labels = limit.get("labels") or {}
     cats = {c["id"]: c["name"] for c in core.category_list(db)} if db is not None else {}
-    names = [cats.get(t[2:], t[2:].capitalize()) if t.startswith("c:") else labels.get(t) or t[2:]
+    names = [{"g:phone": "Phone games", "g:computer": "Computer games"}.get(t)
+             or (cats.get(t[2:], t[2:].capitalize()) if t.startswith("c:") else labels.get(t) or t[2:])
              for t in limit["targets"]]
     return ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
 
@@ -554,17 +619,20 @@ def unlock_state(db, lim, now):
     per_day = u["per_day"] if u else 0
     wait = db.execute("SELECT id, ready FROM unlocks WHERE limit_id = ? AND at IS NULL AND started >= ? "
                       "ORDER BY started DESC LIMIT 1", (lim["id"], int(a * 1000))).fetchone() if u else None
+    burn = any(r["kind"] == "burn" for r in lim["rules"])
     return {"per_day": per_day, "used": len(times),
             "left": None if not u else (None if per_day is None else max(0, per_day - len(times))),
-            "open_until": until if until and until > ms_now else None, "times": times,
-            "pending": {"id": wait[0], "ready": wait[1]} if wait else None}
+            "open_until": None if burn else (until if until and until > ms_now else None), "times": times,
+            "pending": None if burn else ({"id": wait[0], "ready": wait[1]} if wait else None)}
 
 
-def start_unlock(db, lid, device="", now=None):
+def start_unlock(db, lid, device="", now=None, live=None):
     """Begin unlocking a limit on a computer. Returns when it can be opened, in ms."""
     now = now if now is not None else time.time()
-    settle(db, now)
+    settle(db, now, live)
     lim = _row(db, lid)
+    if any(r["kind"] == "burn" for r in lim["rules"]):
+        raise ValueError("Burn limits can't be unlocked.")
     u = lim.get("unlock")
     if not u:
         raise ValueError("This limit can't be unlocked.")
@@ -594,6 +662,8 @@ def open_unlock(db, uid, now=None):
     if ms_now + GRACE < ready:
         raise ValueError("You can't unlock it yet.")
     lim = _row(db, lid)
+    if any(r["kind"] == "burn" for r in lim["rules"]):
+        raise ValueError("Burn limits can't be unlocked.")
     u = lim.get("unlock")
     if not u:
         raise ValueError("This limit can't be unlocked.")
@@ -642,12 +712,18 @@ def _programs(app):
     return {n for n in names if _PROGRAM.match(n) and n not in SPARE}
 
 
-def enforce(db, now=None, report_=None):
+def enforce(db, now=None, report_=None, live=None):
     """What computers must block now, for the limits that are closed and not unlocked:
     {"sites": [...], "programs": [...], "games": bool, "limits": [{"id", "label", "until", "sites", "programs"}]}."""
     now = now if now is not None else time.time()
-    rep = report_ or report(db, now)
-    closed = [it for it in rep["limits"] if it["state"]["blocked"] and not it["unlock"]["open_until"]]
+    rep = report_ or report(db, now, live=live)
+    closed = [it for it in rep["limits"] if it["state"]["blocked"]
+              and (any(r["kind"] == "burn" for r in it["limit"]["rules"]) or not it["unlock"]["open_until"])]
+    if live and live.get("phase") == "countdown":
+        # Cache burn definitions before liftoff: if the server disappears, the enforcer still locks on time.
+        upcoming = [{**it, "state": {**it["state"], "until": live["ends_at"]}} for it in rep["limits"]
+                    if any(r["kind"] == "burn" for r in it["limit"]["rules"]) and it not in closed]
+        closed += upcoming
     out = {"sites": [], "programs": [], "games": False, "limits": []}
     if not closed:
         return out
@@ -668,7 +744,13 @@ def enforce(db, now=None, report_=None):
                 doms |= by_name.get(name, set())
                 if name not in by_name and _PROGRAM.match(name) and name not in SPARE and name not in core.BROWSERS:
                     progs.add(name)
-            else:
+            elif t.startswith("s:"):
+                doms.add(t[2:])
+            elif t.startswith("p:"):
+                progs.add(t[2:].lower())
+            elif t.startswith("g:"):
+                out["games"] = out["games"] or t == "g:computer"
+            elif not t.startswith("a:"):
                 cat = t[2:]
                 for word, c in core.BUILTIN.items():
                     if c == cat:
@@ -685,12 +767,14 @@ def enforce(db, now=None, report_=None):
                 else:
                     doms |= by_name.get(s.lower(), set())
         for a in apps:
-            if matches(lim, namer, a, ""):
+            if matches(lim, namer, a, "", "computer"):
                 progs |= _programs(a)
         doms = sorted(d for d in doms if d and _HOST.match(d))
         progs = sorted(p for p in progs if " " not in p)
-        games = any(t == "c:play" for t in lim["targets"])
+        games = any(t in ("c:play", "g:computer") for t in lim["targets"])
+        burn = any(r["kind"] == "burn" for r in lim["rules"])
         out["limits"].append({"id": lim["id"], "label": it["label"], "until": it["state"]["until"],
+                              "burn": burn, "starts_at": live.get("starts_at") if burn and live else None,
                               "sites": doms, "programs": progs, "games": games})
         out["sites"] += [d for d in doms if d not in out["sites"]]
         out["programs"] += [p for p in progs if p not in out["programs"]]
@@ -705,4 +789,4 @@ def _bare(host):
     return ".".join(labels)
 
 
-_HOST = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$")
+_HOST = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$")

@@ -38,8 +38,8 @@ The phone app works entirely on its own: no account, no server, nothing to sign 
    > **Android says the setting is restricted?** It does that for apps that don't come from the Play Store.
    > Open Android's **Settings → Apps → ignition → ⋮** (top right) **→ Allow restricted settings**, then try
    > again.
-4. Back in ignition, go to **⚙ → Blocking**. Add the websites you lose time to, pick the apps, or switch on
-   **Every game**.
+4. Back in ignition, open **Limits → + New limit**. Add the websites you lose time to, pick the apps, or switch on
+   **Phone games**, then add **Blocked while burning**.
 
 That's it. Tap the middle of the dial to ignite.
 
@@ -55,8 +55,8 @@ curl -fsSL https://raw.githubusercontent.com/ieatfood314/ignition/main/install.s
 ```
 
 It asks for your password once, because blocking sites and closing programs needs it. When it's done it
-prints the address to open, normally **http://127.0.0.1:4580**. Bookmark it, then go to **⚙ → Blocking** to
-choose what gets blocked.
+prints the address to open, normally **http://127.0.0.1:4580**. Bookmark it, then open **Limits** to choose what
+gets blocked while burning.
 
 On KDE Plasma it also adds two desktop and panel widgets: the Ignite dial and *Burn goals*. Right-click
 the desktop, choose **Add Widgets** and search for *ignition*.
@@ -85,7 +85,7 @@ less install.sh        # it's short
 
 ### Phone and computers, together
 
-Once connected, everything syncs: your lists, your burns, your settings and your block list. Start a burn on
+Once connected, everything works together: your burns, settings and burn limits. Start a burn on
 your phone and your computer locks down within a second, and the same works the other way round.
 
 The devices reach each other through [Tailscale](https://tailscale.com), which is free and keeps ignition
@@ -102,18 +102,18 @@ private to your own devices instead of putting it on the internet.
 curl -fsSL https://raw.githubusercontent.com/ieatfood314/ignition/main/install.sh | sh -s -- --join http://desk:8445
 ```
 
-That computer gets only the blocker, and follows the burns and block list from the first one.
+That computer gets only the blocker, and follows the burns and limits from the first one.
 
 ## Using it
 
 **Turn the dial, then tap the middle.** The ring works like a minute hand: drag it round (or tap the ring,
 scroll, or use the arrow keys) to set the length, and keep going past twelve to add hours. For a delay, turn
 the small T-minus dial underneath the same way (tap its middle to clear it). There's a 3-second countdown (tap again to scrub), then liftoff: everything
-on your block list is blocked, everywhere, until the ring burns down.
+covered by a burn limit is blocked, everywhere, until the ring burns down.
 
 - **A burn of an hour or less can't be ended early.** There's no stop button. It runs out when it runs out.
 - **Longer burns** get a hold-to-end button, because once in a while a two-hour block really does need to
-  end. The hour is yours to change, under *Settings › Blocking › Ending early*. During a burn you can
+  end. The hour is yours to change, under *Limits › Burns*. During a burn you can
   only raise it.
 - **You can always add time** (+5, +15, +30), but never take it away.
 - **T-minus** starts a burn after a delay, so you can take a break first. You can ignite early any time, but
@@ -129,7 +129,7 @@ while and haven't.
 
 ## Screen time and limits
 
-These need a server (a Linux computer running ignition), because they count every device together.
+Screen time and timed limits need a server (a Linux computer running ignition), because they count every device together. Burn-only limits also work on a standalone phone and move to the server when you connect one.
 
 **Screen** shows where today went: an hour-by-hour chart by category, each device's own strip, your burns
 over the top, and every app and site. *Weeks* and *Apps* look further back. Tap an app to change its category;
@@ -144,6 +144,7 @@ whole category, including your custom ones (*Play* covers every game, including 
 - **a day's allowance**: so many minutes a day (days start at 4 am);
 - **a rolling allowance**: so many minutes in any few hours;
 - **closed hours**: say 10 pm to 7 am, or all day;
+- **while burning**: blocked from liftoff until the burn ends;
 - **within hours**: so many minutes between two times;
 - **a break**: after so many minutes in a row, a rest before it opens again.
 
@@ -161,9 +162,9 @@ and the clock.
 | | On your phone | On your computers |
 | --- | --- | --- |
 | **Websites** | In every browser | In every browser |
-| **Apps** | The ones you pick, or every game. Open one and you're sent to the home screen | Programs you name (like `steam`), or every game, are closed if you start them. Already open at liftoff, they're paused until the burn ends, with a heads-up a minute before a T-minus |
+| **Apps** | The ones you pick, or every game. Open one and the Limits page takes the screen | Programs you name (like `steam`), or every game, are closed if you start them. Already open at liftoff, they're paused until the burn ends, with a heads-up a minute before a T-minus |
 
-You set it once in **⚙ → Blocking**. With sync on, it applies everywhere.
+Set a **Blocked while burning** rule in **Limits**. With sync on, it applies everywhere.
 
 A closed **limit** blocks the same way, outside burns too. On the phone, the Limits page takes the screen
 and says when it opens. On computers, sites are blocked and programs closed (or paused, if they were open

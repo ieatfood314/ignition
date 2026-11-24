@@ -227,15 +227,17 @@ object LimitStore {
     private fun file(ctx: Context) = File(ctx.applicationContext.filesDir, "limits.json")
 
     fun get(ctx: Context): LimitSnapshot {
-        cached?.let { return it }
+        val store = Store.get(ctx)
+        val local = synchronized(store) { store.serverUrl.isEmpty() }
+        if (!local) cached?.let { return it }
         synchronized(lock) {
-            cached?.let { return it }
+            if (!local) cached?.let { return it }
             val f = file(ctx)
             val snap = runCatching {
                 if (f.exists()) LimitSnapshot.parse(JSONObject(f.readText()), f.lastModified(), BlockerService.gamePackages(ctx)) else null
             }.getOrNull() ?: LimitSnapshot.EMPTY
             cached = snap
-            return snap
+            return if (local) LocalLimits.snapshot(ctx, store) else snap
         }
     }
 
