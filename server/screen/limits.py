@@ -318,18 +318,22 @@ def matches(limit, namer, app, site, platform=None):
     targets = limit["targets"]
     if namer.key(app, site) in targets or ("c:" + namer.category(app, site)) in targets:
         return True
+    short = app.lower().rsplit(".", 1)[-1]
+    direct = any((t == "a:" + app and platform != "computer")
+                 or (t.startswith("p:") and platform != "phone" and t[2:].lower() in (app.lower(), short))
+                 for t in targets)
+    if direct:
+        return True
     if site:
         return any(t.startswith("s:") and _site_matches(t[2:], site) for t in targets)
-    short = app.lower().rsplit(".", 1)[-1]
-    return any((t == "a:" + app and platform != "computer")
-               or (t.startswith("p:") and platform != "phone" and t[2:].lower() in (app.lower(), short))
-               for t in targets)
+    return False
 
 
-def usage_for(limit, spans, namer, exclude_device=None):
+def usage_for(limit, spans, namer, exclude_device=None, platforms=None):
     """Merged [start, end] seconds on what the limit covers, from (device, a, b, app, site) spans."""
+    platforms = platforms or {}
     return core.merge([[a, b] for d, a, b, app, site in spans
-                       if d != exclude_device and matches(limit, namer, app, site)])
+                       if d != exclude_device and matches(limit, namer, app, site, platforms.get(d))])
 
 
 # ---- storage ----
@@ -421,6 +425,8 @@ def set_category_many(db, changes, now=None, live=None):
                 raise ValueError("key must look like n:<name>")
             new = cat if cat in known else None
             was = set(by_key.get(key, set()))
+            if key[2:].lower() in core.BUILTIN:
+                was.add(core.BUILTIN[key[2:].lower()])
             if key in namer.overrides:
                 was.add(namer.overrides[key])
             leaves_burn = any(c in burn_limited and c != new for c in was)
@@ -546,6 +552,8 @@ def report(db, now=None, device=None, live=None):
     listing = rows(db, now, live)
     namer = core.Namer(db)
     spans = core.load_spans(db, now - HORIZON, now)
+    platforms = {d: "phone" if kind in ("phone", "tablet") or platform.startswith("Android") else "computer"
+                 for d, kind, platform in db.execute("SELECT id, kind, platform FROM devices")}
     out = []
     apps = sites = None
     if device:
@@ -558,7 +566,7 @@ def report(db, now=None, device=None, live=None):
         sites |= {t[2:] for r in listing for t in r["limit"]["targets"] if t.startswith("s:")}
     for r in listing:
         lim = r["limit"]
-        usage = usage_for(lim, spans, namer)
+        usage = usage_for(lim, spans, namer, platforms=platforms)
         item = {**r, "state": evaluate(lim, usage, now, live), "label": label(lim, db), "unlock": unlock_state(db, lim, now)}
         if device:
             item["match"] = {
@@ -566,7 +574,7 @@ def report(db, now=None, device=None, live=None):
                 "sites": sorted(s for s in sites if matches(lim, namer, "", s, "phone")),
                 "names": [t[2:] for t in lim["targets"] if t.startswith("n:")],
             }
-            item["others"] = [[int(a * 1000), int(b * 1000)] for a, b in usage_for(lim, spans, namer, device)]
+            item["others"] = [[int(a * 1000), int(b * 1000)] for a, b in usage_for(lim, spans, namer, device, platforms)]
         out.append(item)
     s = settings(db)
     pending_s = core.kv_get(db, "limit_settings_pending")
@@ -717,15 +725,19 @@ def enforce(db, now=None, report_=None, live=None):
     {"sites": [...], "programs": [...], "games": bool, "limits": [{"id", "label", "until", "sites", "programs"}]}."""
     now = now if now is not None else time.time()
     rep = report_ or report(db, now, live=live)
-    closed = [it for it in rep["limits"] if it["state"]["blocked"]
-              and (any(r["kind"] == "burn" for r in it["limit"]["rules"]) or not it["unlock"]["open_until"])]
-    if live and live.get("phase") == "countdown":
-        # Cache burn definitions before liftoff: if the server disappears, the enforcer still locks on time.
-        upcoming = [{**it, "state": {**it["state"], "until": live["ends_at"]}} for it in rep["limits"]
-                    if any(r["kind"] == "burn" for r in it["limit"]["rules"]) and it not in closed]
-        closed += upcoming
+    selected = []
+    for it in rep["limits"]:
+        burn_now = bool(live and live.get("phase") == "burning"
+                        and any(r["kind"] == "burn" and r["blocked"] for r in it["state"]["rules"]))
+        if it["state"]["blocked"] and not burn_now and not it["unlock"]["open_until"]:
+            selected.append((it, False))  # a timed rule, including one sharing a limit with a burn rule
+        if burn_now:
+            selected.append((it, True))
+        if live and live.get("phase") == "countdown" and any(r["kind"] == "burn" for r in it["limit"]["rules"]):
+            upcoming = {**it, "state": {**it["state"], "until": live["ends_at"]}}
+            selected.append((upcoming, True))
     out = {"sites": [], "programs": [], "games": False, "limits": []}
-    if not closed:
+    if not selected:
         return out
     namer = core.Namer(db)
     since = int((now - _SEEN_DAYS * 86400) * 1000)
@@ -735,7 +747,7 @@ def enforce(db, now=None, report_=None, live=None):
     apps = {a for d, a in db.execute("SELECT DISTINCT device, app FROM spans WHERE end > ?", (since,)) if d in computers}
     sites = {s for (s,) in db.execute("SELECT DISTINCT site FROM spans WHERE site != '' AND end > ?", (since,))}
     by_name = _domains_by_name()
-    for it in closed:
+    for it, burn in selected:
         lim = it["limit"]
         doms, progs = set(), set()
         for t in lim["targets"]:
@@ -772,8 +784,7 @@ def enforce(db, now=None, report_=None, live=None):
         doms = sorted(d for d in doms if d and _HOST.match(d))
         progs = sorted(p for p in progs if " " not in p)
         games = any(t in ("c:play", "g:computer") for t in lim["targets"])
-        burn = any(r["kind"] == "burn" for r in lim["rules"])
-        out["limits"].append({"id": lim["id"], "label": it["label"], "until": it["state"]["until"],
+        out["limits"].append({"id": lim["id"] + (":burn" if burn else ""), "label": it["label"], "until": it["state"]["until"],
                               "burn": burn, "starts_at": live.get("starts_at") if burn and live else None,
                               "sites": doms, "programs": progs, "games": games})
         out["sites"] += [d for d in doms if d not in out["sites"]]

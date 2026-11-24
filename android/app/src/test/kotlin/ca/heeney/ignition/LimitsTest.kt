@@ -110,6 +110,7 @@ class LimitsTest {
             "match":{"apps":[],"sites":[],"names":[]},"others":[]}],"settings":{"guard":true}}""")
         val l = LimitSnapshot.parse(o, 5, setOf("com.new.game")).limits.single()
         assertTrue(Limits.covers(l, "com.termux", ""))
+        assertTrue(Limits.covers(l, "com.termux", "example.com"))
         assertTrue(Limits.covers(l, "org.mozilla.firefox", "m.youtube.com"))
         assertFalse(Limits.covers(l, "com.new.game", ""))
         assertFalse(Limits.covers(l, "org.mozilla.firefox", "notyoutube.com"))

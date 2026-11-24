@@ -112,7 +112,7 @@ class Enforcer:
         self.show_lock = threading.Lock()
         self.notify_user = cfg.get("notify_user")
         self.session = self.load_cache()
-        self.session.pop("block", None)  # old cache: shared blocks are limits now
+        self.legacy_block = self.session.pop("block", None)  # keep until the first unified server answer
         self.limits = self.session.pop("limits", None) or NO_LIMITS
         self.limit_since = self.session.pop("limit_since", None) or {}  # limit id -> when it closed here
         self.armed = False
@@ -135,7 +135,8 @@ class Enforcer:
     def save_cache(self):
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         tmp = CACHE.with_suffix(".tmp")
-        tmp.write_text(json.dumps({**self.session, "limits": self.limits, "limit_since": self.limit_since}))
+        old = {"block": self.legacy_block} if self.legacy_block is not None else {}
+        tmp.write_text(json.dumps({**self.session, **old, "limits": self.limits, "limit_since": self.limit_since}))
         tmp.replace(CACHE)
 
     @property
@@ -173,7 +174,11 @@ class Enforcer:
                 out.setdefault(GAME, (since, lim))
         if self.active():
             started = self.session.get("started_at") or 0
-            for name in self.block:
+            legacy = self.legacy_block or {}
+            burn_programs = set(self.block) | set(legacy.get("programs") or [])
+            if legacy.get("games"):
+                burn_programs.add(GAME)
+            for name in burn_programs:
                 out[name] = (started, None)
         return out
 
@@ -193,11 +198,13 @@ class Enforcer:
             return f"server unreachable: {e}"
         new = {k: s.get(k) for k in ("active", "phase", "session_id", "started_at", "ends_at")}
         new["created_at"] = (s.get("session") or {}).get("created_at")
-        limits = s.get("limit_block") or NO_LIMITS
+        unified = s.get("limit_block")
+        limits = unified or NO_LIMITS
+        legacy = None if unified is not None else self.legacy_block
         ids = {lim["id"] for lim in limits.get("limits") or []}
         since = {i: self.limit_since.get(i, time.time()) for i in ids}
-        if new != self.session or limits != self.limits or since != self.limit_since:
-            self.session, self.limits, self.limit_since = new, limits, since
+        if new != self.session or limits != self.limits or since != self.limit_since or legacy != self.legacy_block:
+            self.session, self.limits, self.limit_since, self.legacy_block = new, limits, since, legacy
             self.save_cache()
         return None
 
@@ -626,7 +633,10 @@ class Enforcer:
         """A minute before a T-minus lifts off, say what it'll pause, so there's time to get to a checkpoint."""
         s = self.session
         left = (s.get("started_at") or 0) - time.time()
-        burn_block = set(self.block)
+        legacy = self.legacy_block or {}
+        burn_block = set(self.block) | set(legacy.get("programs") or [])
+        if legacy.get("games"):
+            burn_block.add(GAME)
         for lim in self.limits.get("limits") or []:
             if lim.get("burn"):
                 burn_block.update(lim.get("programs") or [])
@@ -681,7 +691,8 @@ class Enforcer:
             return
         if not self.armed:
             log(f"session active until {time.ctime(self.session['ends_at'])}: arming")
-        self.apply_hosts(sorted(set(sites)))
+        legacy_sites = (self.legacy_block or {}).get("sites") or []
+        self.apply_hosts(sorted(set(sites) | set(legacy_sites)))
         if self.t3.get("ports") or self.block_ports:
             self.apply_nft()
             self.kill_clients()

@@ -190,6 +190,24 @@ class Storage(unittest.TestCase):
         row = limits.report(self.db, now=later + 31 * 60)["limits"][0]
         self.assertEqual(row["limit"]["targets"], ["s:youtube.com"])
 
+    def test_burn_builtin_category_change_without_spans_waits(self):
+        t = at(MON, 9)
+        core.kv_set(self.db, "limit_settings", json.dumps({"changes_wait": 0, "guard": True}))
+        limits.save(self.db, {"targets": ["c:watch"], "rules": [{"kind": "burn"}]}, now=t)
+        live = {"phase": "burning", "starts_at": t - 60, "ends_at": t + 3600, "locked": True}
+        r = limits.set_category(self.db, "n:youtube", "make", now=t, live=live)
+        self.assertFalse(r["applied"])
+        self.assertEqual(r["at"], int((t + 3600) * 1000))
+
+    def test_direct_usage_does_not_leak_between_platforms(self):
+        now = at(MON, 12)
+        body = lambda dev, kind: {"device": {"id": dev, "name": dev, "kind": kind}, "spans": [
+            [int(at(MON, 9) * 1000), int(at(MON, 10) * 1000), "org.videolan.vlc", "example.com"]]}
+        core.ingest(self.db, body("phone-1234", "phone"), now=now)
+        limit = limits.save(self.db, {"targets": ["p:vlc"], "rules": [{"kind": "day", "minutes": 30}]}, now=now)
+        row = limits.report(self.db, now=now)["limits"][0]
+        self.assertEqual(row["state"]["rules"][0]["used"], 0)
+
     def test_settings_shorter_wait_waits(self):
         t = at(MON, 9)
         r = limits.save_settings(self.db, {"changes_wait": 5}, now=t)
@@ -360,6 +378,18 @@ class Enforce(unittest.TestCase):
         self.assertFalse(limits.matches(l, namer, "", "notexample.com"))
         self.assertTrue(limits.matches(l, namer, "", "nas.local:8000"))
         self.assertFalse(limits.matches(l, namer, "", "nas.local:9000"))
+
+    def test_mixed_burn_and_timed_rules_keep_their_own_closures(self):
+        now = at(MON, 12)
+        limits.save(self.db, {"targets": ["s:example.com"],
+                              "rules": [{"kind": "burn"}, {"kind": "block", "from": "00:00", "to": "00:00"}]}, now=now)
+        ordinary = limits.enforce(self.db, now=now)["limits"]
+        self.assertEqual(len(ordinary), 1)
+        self.assertFalse(ordinary[0]["burn"])
+        countdown = {"phase": "countdown", "starts_at": at(MON, 13), "ends_at": at(MON, 14)}
+        both = limits.enforce(self.db, now=now, live=countdown)["limits"]
+        self.assertEqual(len(both), 2)
+        self.assertEqual({x["burn"] for x in both}, {False, True})
 
     def test_nothing_closed_blocks_nothing(self):
         now = at(MON, 12)

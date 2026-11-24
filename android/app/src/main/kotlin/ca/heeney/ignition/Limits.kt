@@ -167,7 +167,8 @@ object Limits {
 
     /** Does a span of [pkg] showing [site] ("" for none) count towards [limit]? */
     fun covers(limit: Limit, pkg: String, site: String): Boolean {
-        if (site.isEmpty()) return pkg in limit.apps
+        if (pkg in limit.apps) return true
+        if (site.isEmpty()) return false
         if (site in limit.sites || Blocking.matchSite(site, limit.siteTargets.toList()) != null) return true
         val labels = site.lowercase().split('.').dropLast(1)
         return limit.names.any { n -> NOT_LETTERS.replace(n.lowercase(), "").let { it.isNotEmpty() && it in labels } }

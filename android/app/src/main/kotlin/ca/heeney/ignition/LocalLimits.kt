@@ -238,7 +238,9 @@ object LocalLimits {
         fun alreadyThere(limit: JSONObject): Boolean {
             val targets = limit.getJSONArray("targets").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
             for (i in 0 until existing.length()) {
-                val other = existing.getJSONObject(i).getJSONObject("limit")
+                val item = existing.getJSONObject(i)
+                if (!item.isNull("pending")) continue
+                val other = item.getJSONObject("limit")
                 val otherTargets = other.getJSONArray("targets").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
                 val rules = other.optJSONArray("rules") ?: JSONArray()
                 val oneBurn = rules.length() == 1 && rules.getJSONObject(0).optString("kind") == "burn"

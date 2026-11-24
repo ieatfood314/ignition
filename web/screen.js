@@ -873,11 +873,19 @@ $("#lim-add").addEventListener("submit", (e) => {
   if (!v) return;
   const hit = (sc.range ? sc.range.census : []).find((x) => x.key && x.label.toLowerCase() === v.toLowerCase());
   const site = cleanTargetSite(v);
-  const tlds = new Set(["com", "net", "org", "io", "dev", "app", "ca", "tv", "me", "co", "uk", "de", "us", "info", "xyz"]);
-  const pkg = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(v) && !tlds.has(v.split(".").pop().toLowerCase());
-  const k = hit ? hit.key : pkg ? `a:${v}` : site ? `s:${site}` : `n:${v.toLowerCase()}`;
+  const k = hit ? hit.key : site ? `s:${site}` : `n:${v.toLowerCase()}`;
   if (!draft.targets.includes(k)) draft.targets.push(k);
   draft.labels[k] = hit ? hit.label : site || v;
+  input.value = "";
+  drawTargets();
+});
+$("#lim-add-app").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = $("input", e.target), v = input.value.trim();
+  if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(v)) { toast("Use a package name like com.reddit.frontpage."); return; }
+  const k = `a:${v}`;
+  if (!draft.targets.includes(k)) draft.targets.push(k);
+  draft.labels[k] = v;
   input.value = "";
   drawTargets();
 });
