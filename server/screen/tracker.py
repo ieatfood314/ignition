@@ -157,6 +157,7 @@ class Recorder:
         self.focus = None  # (app, site) of the window with focus
         self.locked = False
         self.idle = False
+        self.agent = False
         self.open = None  # {"start", "end", "app", "site", "saved"}, times in ms
         self.parked = None  # the span that was open when idleness began, and when that was
 
@@ -165,7 +166,7 @@ class Recorder:
         return self.open is not None
 
     def _want(self):
-        if self.locked or self.idle or not self.focus or self.focus[0] in core.IGNORED_APPS:
+        if self.locked or self.idle or self.agent or not self.focus or self.focus[0] in core.IGNORED_APPS:
             return None
         return self.focus
 
@@ -201,6 +202,14 @@ class Recorder:
         self.beat(now)
         self.locked = bool(locked)
         if locked:
+            self.parked = None
+        self._settle(now)
+
+    def set_agent(self, active, now):
+        """Remote and agent-driven desktop use isn't this person's screen time."""
+        self.beat(now)
+        self.agent = bool(active)
+        if active:
             self.parked = None
         self._settle(now)
 
@@ -246,6 +255,37 @@ class Recorder:
         if self.open:
             self._save(self.open)
             self.open = None
+
+
+class IdleGate:
+    """Combine the compositor's ordinary and input-only idle notices.
+
+    An ordinary notice can say "resumed" when a screen inhibitor appears or disappears, without any input.
+    Once the input-only notice says nobody is there, only input returning may start the clock again.
+    """
+
+    def __init__(self, recorder, policy_inhibited):
+        self.recorder = recorder
+        self.policy_inhibited = policy_inhibited
+        self.normal_quiet = False
+        self.raw_quiet = False
+
+    def normal(self, quiet, now):
+        self.normal_quiet = bool(quiet)
+        self.apply(now, since=now - IDLE_AFTER if quiet else None)
+
+    def raw(self, quiet, now):
+        self.raw_quiet = bool(quiet)
+        self.apply(now)
+
+    def apply(self, now, since=None):
+        if self.raw_quiet:
+            self.recorder.set_idle(True, now)
+        elif self.normal_quiet:
+            if not self.policy_inhibited():
+                self.recorder.set_idle(True, now, since=since)
+        else:
+            self.recorder.set_idle(False, now)
 
 
 # ---- names for window classes ----
@@ -390,6 +430,42 @@ class Uploader:
         return True
 
 
+# ---- agent-driven use ----
+
+AGENT_COMMANDS = {"agy", "claude", "codex", "gemini", "kimi", "opencode"}
+
+
+def t3_agent_running(proc_root="/proc"):
+    """An agent is doing a turn on this machine's T3 server (the server itself may always be running)."""
+    try:
+        pids = [p for p in os.listdir(proc_root) if p.isdigit()]
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open(os.path.join(proc_root, pid, "comm")) as f:
+                if f.read().strip() not in AGENT_COMMANDS:
+                    continue
+            with open(os.path.join(proc_root, pid, "cgroup")) as f:
+                if "/t3code.service" in f.read():
+                    return True
+        except OSError:
+            continue  # it exited, or belongs to another user
+    return False
+
+
+def remote_agent_session(bus):
+    """Tailscale SSH sessions are remote agents, not somebody sitting at this computer."""
+    manager = bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1")
+    sessions = manager.ListSessions(dbus_interface="org.freedesktop.login1.Manager")
+    for _, _, _, _, path in sessions:
+        session = bus.get_object("org.freedesktop.login1", path)
+        if session.Get("org.freedesktop.login1.Session", "Remote",
+                       dbus_interface="org.freedesktop.DBus.Properties"):
+            return True
+    return False
+
+
 # ---- the daemon ----
 
 def run(hub=None):
@@ -425,9 +501,8 @@ def run(hub=None):
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
+    system_bus = dbus.SystemBus()
     script_path = os.path.join(core.data_dir(), "kwin-tracker.js")
-
-    state = {"quiet": False, "quiet_since": 0.0}  # the compositor's view: no input for IDLE_AFTER
 
     def policy_inhibited():
         """Is something (a playing video, a presentation) asking for the screen to stay on?"""
@@ -438,23 +513,14 @@ def run(hub=None):
         except dbus.DBusException:
             return False
 
+    idle = IdleGate(recorder, policy_inhibited)
+
     def on_quiet(quiet):
-        now = time.time()
-        state["quiet"] = quiet
-        if not quiet:
-            recorder.set_idle(False, now)
-        elif policy_inhibited():
-            state["quiet_since"] = now - IDLE_AFTER
-        else:
-            recorder.set_idle(True, now, since=now - IDLE_AFTER)
+        idle.normal(quiet, time.time())
 
     def on_long_quiet(quiet):
         # No input at all for WATCHING_LIMIT, whatever is playing: nobody is watching any more.
-        if quiet:
-            recorder.set_idle(True, time.time())
-        else:
-            state["quiet"] = False
-            recorder.set_idle(False, time.time())
+        idle.raw(quiet, time.time())
 
     class Service(dbus.service.Object):
         @dbus.service.method(BUS_NAME, in_signature="ss")
@@ -525,9 +591,14 @@ def run(hub=None):
 
     def tick():
         now = time.time()
-        if state["quiet"] and not recorder.idle and not policy_inhibited():
-            # The video that was keeping the screen awake has stopped, and still nobody has touched anything.
-            recorder.set_idle(True, now)
+        local_agent = t3_agent_running()
+        try:
+            remote_agent = remote_agent_session(system_bus)
+        except dbus.DBusException:
+            remote_agent = False
+        recorder.set_agent(local_agent or remote_agent, now)
+        # A video may have stopped, or an ordinary notice may have resumed without any actual input.
+        idle.apply(now)
         recorder.beat(now)
         return True
 
@@ -579,6 +650,6 @@ def status(recorder, uploader, device, name):
     return {
         "device": device, "name": name, "version": core.VERSION, "hub": uploader.hub,
         "hub_error": uploader.error, "last_push": uploader.last_ok, "waiting": waiting,
-        "recording": recorder.active, "locked": recorder.locked, "idle": recorder.idle,
+        "recording": recorder.active, "locked": recorder.locked, "idle": recorder.idle, "agent": recorder.agent,
         "now": {"app": recorder.open["app"], "site": recorder.open["site"]} if recorder.open else None,
     }

@@ -75,6 +75,16 @@ class RecorderTest(unittest.TestCase):
         self.r.stop(T + 450)
         self.assertEqual(self.spans(), [(0, 100, "kitty", ""), (400, 450, "kitty", "")])
 
+    def test_agent_use_stops_the_clock(self):
+        self.r.set_focus("kitty", "", T)
+        self.run_for(T, 30)
+        self.r.set_agent(True, T + 30)
+        self.run_for(T + 30, 600)
+        self.r.set_agent(False, T + 630)
+        self.run_for(T + 630, 50)
+        self.r.stop(T + 680)
+        self.assertEqual(self.spans(), [(0, 30, "kitty", ""), (630, 680, "kitty", "")])
+
     def test_walking_away_is_dated_back_to_the_last_input(self):
         self.r.set_focus("kitty", "", T)
         t = self.run_for(T, 400)
@@ -104,6 +114,22 @@ class RecorderTest(unittest.TestCase):
         self.r.stop(t + 100)
         self.assertEqual(self.spans(), [(0, 220, "zen", "Wikipedia"), (460, 500, "kitty", "")])
 
+    def test_an_inhibitor_change_does_not_restart_an_idle_night(self):
+        inhibited = [True]
+        idle = tracker.IdleGate(self.r, lambda: inhibited[0])
+        self.r.set_focus("kitty", "", T)
+        t = self.run_for(T, 120)
+        idle.raw(True, t)                         # the input-only watch has decided nobody is there
+        inhibited[0] = False
+        idle.normal(False, t + 60)                # an inhibitor change, not keyboard or pointer input
+        idle.apply(t + 60)
+        t = self.run_for(t + 60, 420)
+        idle.normal(False, t)
+        idle.raw(False, t)                        # actual input returns
+        self.run_for(t, 60)
+        self.r.stop(t + 60)
+        self.assertEqual(self.spans(), [(0, 120, "kitty", ""), (600, 660, "kitty", "")])
+
     def test_suspend_ends_the_span_at_the_last_heartbeat(self):
         self.r.set_focus("kitty", "", T)
         t = self.run_for(T, 100)
@@ -119,6 +145,25 @@ class RecorderTest(unittest.TestCase):
         self.run_for(T + 20, 20)
         self.r.stop(T + 40)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 2)
+
+
+class AgentProcessTest(unittest.TestCase):
+    def process(self, root, pid, command, cgroup):
+        directory = os.path.join(root, str(pid))
+        os.makedirs(directory)
+        with open(os.path.join(directory, "comm"), "w") as f:
+            f.write(command + "\n")
+        with open(os.path.join(directory, "cgroup"), "w") as f:
+            f.write(cgroup + "\n")
+
+    def test_only_an_agent_turn_counts_not_the_t3_server(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.process(tmp, 10, "node-MainThread", "0::/user.slice/user@1000.service/app.slice/t3code.service\n")
+            self.assertFalse(tracker.t3_agent_running(tmp))
+            self.process(tmp, 11, "opencode", "0::/user.slice/user@1000.service/app.slice/other.service\n")
+            self.assertFalse(tracker.t3_agent_running(tmp))
+            self.process(tmp, 12, "claude", "0::/user.slice/user@1000.service/app.slice/t3code.service\n")
+            self.assertTrue(tracker.t3_agent_running(tmp))
 
 
 class ImportTest(unittest.TestCase):
