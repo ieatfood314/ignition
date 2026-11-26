@@ -147,12 +147,25 @@ class RecorderTest(unittest.TestCase):
         agents.note_remote(T + 30)                # SessionNew catches a session the next poll could miss
         agents.update(False, False, T + 31)
         agents.input(T + 32)                      # trailing synthetic input still belongs to the agent
-        self.run_for(T + 31, 599)
+        self.run_for(T + 31, 1269)
         self.assertFalse(self.r.active)
-        agents.input(T + 630)                     # the first input after the agent really left
-        self.run_for(T + 630, 50)
-        self.r.stop(T + 680)
-        self.assertEqual(self.spans(), [(0, 30, "zen", "Proton Mail"), (630, 680, "zen", "Proton Mail")])
+        agents.input(T + 1300)                    # input after a genuine 20-minute agent-free gap
+        self.run_for(T + 1300, 50)
+        self.r.stop(T + 1350)
+        self.assertEqual(self.spans(), [(0, 30, "zen", "Proton Mail"), (1300, 1350, "zen", "Proton Mail")])
+
+    def test_recurring_agent_sessions_do_not_release_the_pause(self):
+        agents = tracker.AgentGate(self.r)
+        self.r.set_focus("zen", "Proton Mail", T)
+        agents.note_remote(T + 30)
+        for t in (900, 1800):                     # nas's observed agent sessions recur every 15 minutes
+            agents.note_remote(T + t)
+            agents.update(False, False, T + t + 1)
+            agents.input(T + t + 100)
+            self.assertTrue(self.r.agent)
+            self.assertFalse(self.r.active)
+        agents.input(T + 3001)
+        self.assertFalse(self.r.agent)
 
     def test_suspend_ends_the_span_at_the_last_heartbeat(self):
         self.r.set_focus("kitty", "", T)

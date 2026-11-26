@@ -185,9 +185,9 @@ the UI. Custom categories also work as limit targets. Days run from 04:00 to 04:
   window has focus. It keeps the window's class and, for browsers, the site at the end of the title, never the
   title itself. It stores spans locally first, so nothing is lost while the server is out of reach. It stops for
   the lock screen and inactivity, and pauses during remote logins and agent turns on this computer's T3 Code
-  server. After an agent leaves, recording stays paused until fresh input arrives, so its synthetic input and
-  later idle gaps don't count as your screen time. It runs as you, so stopping it stops that computer's time
-  from counting (limits already closed still block).
+  server. After an agent leaves, recording stays paused until input follows a 20-minute agent-free gap, so
+  recurring sessions, synthetic input and later idle gaps don't count as your screen time. It runs as you, so
+  stopping it stops that computer's time from counting (limits already closed still block).
 
 **Limits** live on the server, which evaluates them over every device's time. A rule is `day`
 (minutes a day), `every` (minutes in any N hours, rolling), `block` (blocked between two times; the same time at both ends is all day) or `burn` (blocked while burning). Burn-only limits also work locally on a standalone phone and upload when it connects to a server. The same

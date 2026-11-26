@@ -39,7 +39,7 @@ IDLE_AFTER = 180  # seconds without input before the compositor tells us
 STILL_THERE = 300  # back within this long of your last input and you never left (you were reading)
 WATCHING_LIMIT = 7200  # a playing video keeps time counting without input, but not for longer than this
 INPUT_WATCH = 1  # a raw watch this short notices input after an agent disconnects
-AGENT_INPUT_GRACE = 2  # input right as an agent disconnects still belongs to the agent
+AGENT_INPUT_GRACE = 20 * 60  # recurring agent jobs must not hand the desktop back between sessions
 PUSH_EVERY = 60
 
 KWIN_SCRIPT = """\
