@@ -130,6 +130,30 @@ class RecorderTest(unittest.TestCase):
         self.r.stop(t + 60)
         self.assertEqual(self.spans(), [(0, 120, "kitty", ""), (600, 660, "kitty", "")])
 
+    def test_long_idle_never_stitches_back_into_active_time(self):
+        idle = tracker.IdleGate(self.r, lambda: True)
+        self.r.set_focus("zen", "Proton Mail", T)
+        t = self.run_for(T, 120)
+        idle.raw(True, t)                         # stands in for the two-hour input-only timeout
+        idle.raw(False, t + 60)
+        self.run_for(t + 60, 60)
+        self.r.stop(t + 120)
+        self.assertEqual(self.spans(), [(0, 120, "zen", "Proton Mail"), (180, 240, "zen", "Proton Mail")])
+
+    def test_short_agent_session_stays_paused_until_fresh_input(self):
+        agents = tracker.AgentGate(self.r)
+        self.r.set_focus("zen", "Proton Mail", T)
+        self.run_for(T, 30)
+        agents.note_remote(T + 30)                # SessionNew catches a session the next poll could miss
+        agents.update(False, False, T + 31)
+        agents.input(T + 32)                      # trailing synthetic input still belongs to the agent
+        self.run_for(T + 31, 599)
+        self.assertFalse(self.r.active)
+        agents.input(T + 630)                     # the first input after the agent really left
+        self.run_for(T + 630, 50)
+        self.r.stop(T + 680)
+        self.assertEqual(self.spans(), [(0, 30, "zen", "Proton Mail"), (630, 680, "zen", "Proton Mail")])
+
     def test_suspend_ends_the_span_at_the_last_heartbeat(self):
         self.r.set_focus("kitty", "", T)
         t = self.run_for(T, 100)
@@ -145,6 +169,17 @@ class RecorderTest(unittest.TestCase):
         self.run_for(T + 20, 20)
         self.r.stop(T + 40)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 2)
+
+
+class IdleWatchTest(unittest.TestCase):
+    def test_reconnect_is_not_evidence_of_real_input(self):
+        calls = []
+        watch = tracker.IdleWatch([
+            (180, False, lambda quiet: calls.append("normal")),
+            (1, True, lambda quiet: calls.append("input"), True),
+        ])
+        watch._all_awake()
+        self.assertEqual(calls, ["normal"])
 
 
 class AgentProcessTest(unittest.TestCase):

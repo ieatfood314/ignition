@@ -29,10 +29,12 @@ def _message(obj, opcode, payload=b""):
 class IdleWatch(threading.Thread):
     """Watches for stretches without keyboard or pointer input.
 
-    `watches` is a list of (seconds, raw, callback). The callback gets True
-    when that long has passed without input and False when input returns.
-    A normal watch stays quiet while something (a video, say) is asking the
-    compositor to keep the screen awake; a raw one ignores that and needs
+    `watches` is a list of (seconds, raw, callback), with an optional fourth
+    item that marks a watch used only as evidence of real input. The callback
+    gets True when that long has passed without input and False when input
+    returns. Reconnects synthesize False for ordinary watches, but not for an
+    input-evidence watch. A normal watch stays quiet while something (a video,
+    say) is asking the compositor to keep the screen awake; a raw one ignores that and needs
     version 2 of the protocol, so it is skipped on compositors without it.
 
     Callbacks run on this thread; hand off to your main loop inside them.
@@ -45,8 +47,9 @@ class IdleWatch(threading.Thread):
         self.supported = None  # None until the first connection settles it
 
     def _all_awake(self):
-        for _, _, callback in self.watches:
-            callback(False)
+        for watch in self.watches:
+            if len(watch) < 4 or not watch[3]:
+                watch[2](False)
 
     def run(self):
         warned = False
@@ -105,7 +108,8 @@ class IdleWatch(threading.Thread):
                             out += _message(REGISTRY, 0, struct.pack("<I", globals_[iface][0]) + _string(iface)
                                             + struct.pack("<II", v, new_id))
                         notes = {}
-                        for seconds, raw, callback in self.watches:
+                        for watch in self.watches:
+                            seconds, raw, callback = watch[:3]
                             if raw and version < 2:
                                 continue
                             note = FIRST_NOTE + len(notes)

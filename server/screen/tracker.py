@@ -38,6 +38,8 @@ MIN_SPAN = 1000  # ms; focus that passes through a window faster than this isn't
 IDLE_AFTER = 180  # seconds without input before the compositor tells us
 STILL_THERE = 300  # back within this long of your last input and you never left (you were reading)
 WATCHING_LIMIT = 7200  # a playing video keeps time counting without input, but not for longer than this
+INPUT_WATCH = 1  # a raw watch this short notices input after an agent disconnects
+AGENT_INPUT_GRACE = 2  # input right as an agent disconnects still belongs to the agent
 PUSH_EVERY = 60
 
 KWIN_SCRIPT = """\
@@ -213,8 +215,8 @@ class Recorder:
             self.parked = None
         self._settle(now)
 
-    def set_idle(self, idle, now, since=None):
-        """`since` back-dates the start of idleness to the last input."""
+    def set_idle(self, idle, now, since=None, stitch=True):
+        """`since` back-dates the start of idleness to the last input; long idle is never stitched back."""
         if idle == self.idle:
             return
         self.beat(now)
@@ -223,7 +225,7 @@ class Recorder:
             span = self.open
             self.idle = True
             self._settle(now, end=since)
-            self.parked = (span, since) if span else None
+            self.parked = (span, since) if span and stitch else None
             return
         self.idle = False
         parked, self.parked = self.parked, None
@@ -280,12 +282,52 @@ class IdleGate:
 
     def apply(self, now, since=None):
         if self.raw_quiet:
-            self.recorder.set_idle(True, now)
+            self.recorder.set_idle(True, now, stitch=False)
         elif self.normal_quiet:
             if not self.policy_inhibited():
                 self.recorder.set_idle(True, now, since=since)
         else:
             self.recorder.set_idle(False, now)
+
+
+class AgentGate:
+    """Keep agent-driven use out, including short sessions and the idle gaps between them.
+
+    Once an agent has used the computer, fresh input after it has left is what gives the computer back to
+    the person. Without this, an agent's synthetic input looks like local activity for the next idle timeout.
+    """
+
+    def __init__(self, recorder):
+        self.recorder = recorder
+        self.local = False
+        self.remote = False
+        self.latched = False
+        self.last_active = 0.0
+
+    def _apply(self, now):
+        self.recorder.set_agent(self.local or self.remote or self.latched, now)
+
+    def note_remote(self, now):
+        # SessionNew is delivered even for a session that has ended before the next process poll.
+        self.latched = True
+        self.last_active = now
+        self._apply(now)
+
+    def update(self, local, remote, now):
+        was_active = self.local or self.remote
+        self.local, self.remote = bool(local), bool(remote)
+        active = self.local or self.remote
+        if active or was_active:
+            self.last_active = now
+        if active:
+            self.latched = True
+        self._apply(now)
+
+    def input(self, now):
+        current = self.local or self.remote
+        if self.latched and not current and now - self.last_active > AGENT_INPUT_GRACE:
+            self.latched = False
+            self._apply(now)
 
 
 # ---- names for window classes ----
@@ -514,6 +556,7 @@ def run(hub=None):
             return False
 
     idle = IdleGate(recorder, policy_inhibited)
+    agents = AgentGate(recorder)
 
     def on_quiet(quiet):
         idle.normal(quiet, time.time())
@@ -521,6 +564,10 @@ def run(hub=None):
     def on_long_quiet(quiet):
         # No input at all for WATCHING_LIMIT, whatever is playing: nobody is watching any more.
         idle.raw(quiet, time.time())
+
+    def on_input(quiet):
+        if not quiet:
+            agents.input(time.time())
 
     class Service(dbus.service.Object):
         @dbus.service.method(BUS_NAME, in_signature="ss")
@@ -589,24 +636,42 @@ def run(hub=None):
                             path="/ScreenSaver")
     bus.watch_name_owner("org.kde.KWin", on_kwin)
 
-    def tick():
-        now = time.time()
+    def check_agents(now):
         local_agent = t3_agent_running()
         try:
             remote_agent = remote_agent_session(system_bus)
         except dbus.DBusException:
             remote_agent = False
-        recorder.set_agent(local_agent or remote_agent, now)
+        agents.update(local_agent, remote_agent, now)
+
+    def on_session_new(*_):
+        now = time.time()
+        agents.note_remote(now)
+        check_agents(now)
+
+    def on_session_removed(*_):
+        check_agents(time.time())
+
+    system_bus.add_signal_receiver(on_session_new, signal_name="SessionNew",
+                                   dbus_interface="org.freedesktop.login1.Manager", path="/org/freedesktop/login1")
+    system_bus.add_signal_receiver(on_session_removed, signal_name="SessionRemoved",
+                                   dbus_interface="org.freedesktop.login1.Manager", path="/org/freedesktop/login1")
+
+    def tick():
+        now = time.time()
+        check_agents(now)
         # A video may have stopped, or an ordinary notice may have resumed without any actual input.
         idle.apply(now)
         recorder.beat(now)
         return True
 
+    tick()  # don't record the first five seconds of an agent session that predates this process
     GLib.timeout_add_seconds(BEAT, tick)
 
     IdleWatch([
         (IDLE_AFTER, False, lambda quiet: GLib.idle_add(on_quiet, quiet)),
         (WATCHING_LIMIT, True, lambda quiet: GLib.idle_add(on_long_quiet, quiet)),
+        (INPUT_WATCH, True, lambda quiet: GLib.idle_add(on_input, quiet), True),
     ], log=log).start()
 
     stopping = threading.Event()
